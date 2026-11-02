@@ -429,7 +429,7 @@ const mock = (() => {
     rooms: async () => ROOMS.map(r => view(state[r.id])),
     set: async (id, p) => {
       const room = state[id], t = Date.now();
-      if (p.mode && p.mode !== room.mode) {
+      if ((p.mode && p.mode !== room.mode) || (p.mode === 'auto' && room.manualSp != null)) {
         room.mode = p.mode;
         if (p.mode === 'auto') room.manualSp = room.manualUntil = null;
         evts.push({ t, room: id, type: 'mode', temp: room.temp, reason: p.mode });
