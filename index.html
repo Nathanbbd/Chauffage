@@ -21,7 +21,9 @@
     --heat:#FF6A45; --heat-soft:rgba(255,106,69,.16); --cool:#5B9BEA; --idle:#6B7884; color-scheme:dark; }
 }
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%}
+html,body{margin:0;min-height:100%;overflow-x:hidden}
+form label{min-width:0}
+form input:not([type=checkbox]),form select{width:100%;min-width:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-size:16px;line-height:1.45;
   padding:env(safe-area-inset-top,0) 0 calc(76px + env(safe-area-inset-bottom,0));-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
@@ -42,14 +44,13 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .dot.on{background:var(--heat)}
 
 [hidden]{display:none !important}
-.dial{position:relative;width:min(300px,82vw);margin:22px auto 4px;touch-action:none;user-select:none}
+.dial{position:relative;width:min(300px,82vw);margin:22px auto 4px;user-select:none;-webkit-user-select:none}
 .dial svg{display:block;width:100%;height:auto}
 .dial .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
 .now{font-size:4.6rem;font-weight:800;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
 .now sup{font-size:1.6rem;font-weight:600;vertical-align:top;margin-left:2px}
 .sp{color:var(--muted);margin-top:6px}
 .sp b{color:var(--ink);font-weight:600}
-.knob{cursor:grab}
 .adjust{display:flex;justify-content:center;gap:56px;margin-top:-6px}
 .adjust button{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.5rem;font-weight:600}
 .status{text-align:center;margin:18px 0 0;min-height:1.5em}
@@ -492,7 +493,7 @@ function untilText(t, source) {
 /* =========================================================
    STATE
    ========================================================= */
-let rooms = {}, current = 'salon', tab = 'thermo', dragging = false, pendingSp = null;
+let rooms = {}, current = 'salon', tab = 'thermo', pendingSp = null;
 let draft = null, pres = null;
 
 /* --- Sélecteur de pièce --- */
@@ -560,23 +561,6 @@ $('#profline').addEventListener('click', async e => {
   try { rooms[current] = await api.set(current, { mode: 'auto' }); } catch (err) { showConn(err); }
   renderAll();
 });
-
-function setpointFromPointer(e) {
-  const box = $('#dialSvg').getBoundingClientRect();
-  const x = (e.clientX - box.left) / box.width * 280, y = (e.clientY - box.top) / box.height * 280;
-  let rel = ((Math.atan2(y - C, x - C) * 180 / Math.PI) - 135 + 720) % 360;
-  if (rel > 270) rel = rel > 315 ? 0 : 270;
-  const v = DIAL_MIN + rel / 270 * (DIAL_MAX - DIAL_MIN);
-  return clamp(Math.round(v), SP_MIN, SP_MAX);
-}
-const dialEl = $('#dial');
-dialEl.addEventListener('pointerdown', e => {
-  if (rooms[current]?.mode !== 'auto') return;
-  dragging = true; dialEl.setPointerCapture(e.pointerId);
-  pendingSp = setpointFromPointer(e); renderDial();
-});
-dialEl.addEventListener('pointermove', e => { if (!dragging) return; pendingSp = setpointFromPointer(e); renderDial(); });
-dialEl.addEventListener('pointerup', () => { if (!dragging) return; dragging = false; commitSetpoint(pendingSp); });
 
 let spTimer;
 function nudge(d) {
@@ -823,10 +807,10 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab;
   document.body.classList.toggle('fit', tab === 'thermo');
   document.querySelectorAll('nav button').forEach(x => x === b ? x.setAttribute('aria-current', 'page') : x.removeAttribute('aria-current'));
+  $('#rooms').hidden = tab === 'reglages' || tab === 'presence';
   const shown = tab === 'reglages' && !pinOk ? 'pin' : tab;
   ['thermo', 'presence', 'infos', 'reglages', 'pin'].forEach(t => $('#tab-' + t).hidden = t !== shown);
   if (shown === 'pin') { $('#pin').value = ''; $('#pinMsg').textContent = ''; setTimeout(() => $('#pin').focus(), 50); return; }
-  $('#rooms').hidden = tab === 'reglages' || tab === 'presence';
   if (tab === 'infos') renderInfos();
   if (tab === 'presence') { $('#schedMsg').textContent = ''; loadPresence(true); }
   if (tab === 'reglages') fillForm();
@@ -857,7 +841,7 @@ async function refresh() {
     rooms = Object.fromEntries((await api.rooms()).map(r => [r.id, r]));
     showConn();
   } catch (err) { showConn(err); }
-  if (!dragging && pendingSp === null) renderAll();
+  if (pendingSp === null) renderAll();
   if (tab === 'presence') loadPresence(false);
 }
 refresh();
