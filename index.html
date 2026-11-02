@@ -11,13 +11,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
 <style>
 :root{
+  --warn:#B86E00;
   --bg:#E8EDF1; --surface:#F7F9FB; --ink:#1B2530; --muted:#5E6B78; --line:#CDD5DC;
   --heat:#E5482B; --heat-soft:rgba(229,72,43,.14); --cool:#3A78C9; --idle:#8A97A4;
   color-scheme:light;
   font-family:"Bricolage Grotesque", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark){
-  :root{ --bg:#121920; --surface:#1B242D; --ink:#E6ECF1; --muted:#93A1AE; --line:#2C3843;
+  :root{ --warn:#F0A43A; --bg:#121920; --surface:#1B242D; --ink:#E6ECF1; --muted:#93A1AE; --line:#2C3843;
     --heat:#FF6A45; --heat-soft:rgba(255,106,69,.16); --cool:#5B9BEA; --idle:#6B7884; color-scheme:dark; }
 }
 *{box-sizing:border-box}
@@ -57,6 +58,9 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .status{text-align:center;margin:18px 0 0;min-height:1.5em}
 .status.on{color:var(--heat)}
 .status.win{color:var(--cool)}
+.alert{margin-top:14px;padding:11px 14px;border-radius:12px;font-size:.9rem;line-height:1.4;border:1px solid var(--heat);color:var(--heat);background:var(--heat-soft)}
+.alert.warn{border-color:var(--warn);color:var(--warn);background:transparent}
+body.fit.alerting .dial{width:min(82vw, clamp(140px, calc(100svh - 462px - 92px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)), 300px))}
 
 .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:20px}
 .modes button{border:1px solid var(--line);background:none;border-radius:12px;padding:10px 4px;font-weight:600;font-size:.92rem}
@@ -133,6 +137,7 @@ body.fit .modes{margin-top:14px}
     <h1>Chauffage</h1>
     <span class="pill" id="conn">Mode démo</span>
   </header>
+  <div class="alert" id="alert" role="alert" hidden></div>
 
   <div class="rooms" id="rooms" role="group" aria-label="Pièce"></div>
 
@@ -242,6 +247,8 @@ body.fit .modes{margin-top:14px}
       <h2 style="margin:12px 0 0">Connexion</h2>
       <label>Adresse du Worker<input type="url" name="workerUrl" placeholder="https://tuya-appart.boisbourdinnathande.workers.dev"></label>
       <label>Code d’accès<input type="password" name="token" autocomplete="off"></label>
+      <label>Fin de l’essai Tuya IoT Core<input type="date" name="tuyaExp"></label>
+      <p class="hint" style="margin-top:-4px">Sur platform.tuya.com → Cloud → ton projet → Service API. L’app vous prévient 7 jours avant. Après l’avoir prolongé, mets la nouvelle date ici.</p>
       <label class="check"><input type="checkbox" name="demo">Utiliser des données simulées</label>
       <div class="btns">
         <button type="button" class="btn alt" id="test">Tester la connexion</button>
@@ -406,6 +413,7 @@ const api = {
   presence:       ()            => cfg.demo ? mock.presence()              : req('/presence'),
   presenceAction: (action, until) => cfg.demo ? mock.presenceAction(action, until) : post('/presence', { action, until }),
   resetHistory:   ()            => cfg.demo ? mock.resetHistory()          : post('/history/reset', {}),
+  health:         ()            => cfg.demo ? Promise.resolve({ ok: Date.now() }) : req('/health'),
 };
 
 /* =========================================================
@@ -795,6 +803,7 @@ async function fillForm() {
   f.winOn.checked = regSched?.windowDetect ?? true;
   f.winDrop.value = String(regSched?.windowDrop ?? 2);
   f.winMin.value = String(regSched?.windowMinutes ?? 30);
+  f.tuyaExp.value = regSched?.tuyaExpiry || '';
   updateBandHint();
   f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon;
   f.priceHP.value = cfg.priceHP; f.priceHC.value = cfg.priceHC; f.hc.value = cfg.hc;
@@ -813,12 +822,13 @@ $('#form').addEventListener('submit', async e => {
   const reg = {
     hyst: Math.max(1, Math.round(+f.hyst.value || 1)), centered: f.band.value === 'centre',
     windowDetect: f.winOn.checked, windowDrop: +f.winDrop.value, windowMinutes: +f.winMin.value,
+    tuyaExpiry: f.tuyaExp.value || null,
   };
   cfg = readForm(); store.save(cfg);
   $('#msg').textContent = 'Réglages enregistrés.';
   const changed = regSched && (regSched.hyst !== reg.hyst || !!regSched.centered !== reg.centered
     || (regSched.windowDetect ?? true) !== reg.windowDetect || (regSched.windowDrop ?? 2) !== reg.windowDrop
-    || (regSched.windowMinutes ?? 30) !== reg.windowMinutes);
+    || (regSched.windowMinutes ?? 30) !== reg.windowMinutes || (regSched.tuyaExpiry ?? null) !== reg.tuyaExpiry);
   if (wasDemo === cfg.demo && changed) {
     try { regSched = await api.saveSchedule({ ...regSched, ...reg }); }
     catch (err) { $('#msg').textContent = `Enregistré sur ce téléphone, mais la régulation n’a pas pu être envoyée : ${err.message}`; }
@@ -879,11 +889,40 @@ function showConn(err) {
 }
 
 function renderAll() { renderRooms(); renderDial(); renderModes(); if (tab === 'infos') renderInfos(); }
+/* Alerte : chauffage plus piloté, Worker injoignable, essai Tuya bientôt fini */
+let lastHealth = null;
+const ago = t => { const m = Math.round((Date.now() - t) / 60e3); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`; };
+function renderAlert(unreachable) {
+  let msg = '', level = '';
+  const h = lastHealth, now = Date.now();
+  if (!cfg.demo) {
+    if (unreachable) {
+      level = 'err'; msg = 'Impossible de joindre le Worker. Vérifie ta connexion ; si ça dure, regarde l’état du Worker sur Cloudflare.';
+    } else if (h && (h.ok ? now - h.ok > 15 * 60e3 : h.error)) {
+      level = 'err';
+      msg = `Le chauffage n’est plus piloté${h.ok ? ` depuis ${ago(h.ok)}` : ''}. Les radiateurs restent dans leur dernier état.`;
+      if (/expired|28841002/i.test(h.error || '')) msg += ' Cause : l’essai Tuya IoT Core a expiré, prolonge-le sur platform.tuya.com.';
+      else if (h.error) msg += ` Erreur : ${h.error}`;
+    } else if (h?.tuyaExpiry) {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const days = Math.round((new Date(h.tuyaExpiry + 'T00:00') - today) / 864e5);
+      if (days < 0) { level = 'err'; msg = 'L’essai Tuya IoT Core a expiré : prolonge-le sur platform.tuya.com, puis mets la nouvelle date dans Réglages.'; }
+      else if (days <= 7) { level = 'warn'; msg = `L’essai Tuya IoT Core expire ${days === 0 ? 'aujourd’hui' : days === 1 ? 'demain' : `dans ${days} jours`} : pense à le prolonger sur platform.tuya.com.`; }
+    }
+  }
+  const el = $('#alert');
+  el.hidden = !msg; el.className = 'alert ' + level; el.textContent = msg;
+  document.body.classList.toggle('alerting', !!msg);
+}
+
 async function refresh() {
+  let unreachable = false;
   try {
     rooms = Object.fromEntries((await api.rooms()).map(r => [r.id, r]));
     showConn();
-  } catch (err) { showConn(err); }
+  } catch (err) { showConn(err); unreachable = true; }
+  if (!cfg.demo && !unreachable) { try { lastHealth = await api.health(); } catch { unreachable = true; } }
+  renderAlert(unreachable);
   if (pendingSp === null) renderAll();
   if (tab === 'presence') loadPresence(false);
 }
