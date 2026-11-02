@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#E8EDF1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121920" media="(prefers-color-scheme: dark)">
+<title>Chauffage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E8EDF1; --surface:#F7F9FB; --ink:#1B2530; --muted:#5E6B78; --line:#CDD5DC;
+  --heat:#E5482B; --heat-soft:rgba(229,72,43,.14); --cool:#3A78C9; --idle:#8A97A4;
+  color-scheme:light;
+  font-family:"Bricolage Grotesque", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#121920; --surface:#1B242D; --ink:#E6ECF1; --muted:#93A1AE; --line:#2C3843;
+    --heat:#FF6A45; --heat-soft:rgba(255,106,69,.16); --cool:#5B9BEA; --idle:#6B7884; color-scheme:dark; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-size:16px;line-height:1.45;
+  padding:env(safe-area-inset-top,0) 0 calc(76px + env(safe-area-inset-bottom,0));-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--cool);outline-offset:2px}
+.wrap{max-width:460px;margin:0 auto;padding:16px 20px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
+.pill{font-size:.8rem;color:var(--muted);padding:4px 10px;border:1px solid var(--line);border-radius:99px;white-space:nowrap}
+.pill.warn{color:var(--heat);border-color:var(--heat)}
+
+.rooms{display:grid;grid-template-columns:1fr 1fr;margin-top:18px;background:var(--surface);border-radius:14px;padding:4px;gap:4px}
+.rooms button{border:0;background:none;padding:10px;border-radius:10px;font-weight:600;color:var(--muted);display:flex;justify-content:center;gap:8px;align-items:center}
+.rooms button[aria-pressed="true"]{background:var(--bg);color:var(--ink)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
+.dot.on{background:var(--heat)}
+
+section[hidden]{display:none}
+.dial{position:relative;width:min(300px,82vw);margin:22px auto 4px;touch-action:none;user-select:none}
+.dial svg{display:block;width:100%;height:auto}
+.dial .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.now{font-size:4.6rem;font-weight:800;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.now sup{font-size:1.6rem;font-weight:600;vertical-align:top;margin-left:2px}
+.sp{color:var(--muted);margin-top:6px}
+.sp b{color:var(--ink);font-weight:600}
+.knob{cursor:grab}
+.adjust{display:flex;justify-content:center;gap:56px;margin-top:-6px}
+.adjust button{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.5rem;font-weight:600}
+.status{text-align:center;margin:18px 0 0;min-height:1.5em}
+.status.on{color:var(--heat)}
+
+.modes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:20px}
+.modes button{border:1px solid var(--line);background:none;border-radius:12px;padding:10px 4px;font-weight:600;font-size:.92rem}
+.modes button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.hint{color:var(--muted);font-size:.85rem;margin:10px 2px 0}
+
+h2{font-size:1.1rem;margin:28px 0 10px;font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--surface);border-radius:14px;padding:12px}
+.stat strong{display:block;font-size:1.4rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:.8rem}
+.total{margin-top:8px;color:var(--muted);font-size:.9rem}
+.chart{background:var(--surface);border-radius:14px;padding:12px 8px 6px}
+.chart svg{display:block;width:100%;height:auto}
+.legend{display:flex;gap:14px;font-size:.78rem;color:var(--muted);padding:6px 6px 0}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+ul.log{list-style:none;margin:0;padding:0;background:var(--surface);border-radius:14px}
+ul.log li{display:grid;grid-template-columns:52px 1fr auto;gap:10px;padding:11px 14px;border-top:1px solid var(--line);font-size:.92rem}
+ul.log li:first-child{border-top:0}
+ul.log time{color:var(--muted);font-variant-numeric:tabular-nums}
+ul.log .t{color:var(--muted);font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);padding:14px}
+
+form{display:grid;gap:14px}
+label{display:grid;gap:5px;font-size:.9rem;color:var(--muted)}
+input[type=text],input[type=number],input[type=password],input[type=url]{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:11px 12px;color:var(--ink);font-size:1rem}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.check{display:flex;align-items:center;gap:10px;color:var(--ink)}
+.check input{width:20px;height:20px}
+.btns{display:flex;gap:10px}
+.btn{flex:1;border:0;border-radius:12px;padding:13px;font-weight:600;background:var(--ink);color:var(--bg)}
+.btn.alt{background:none;border:1px solid var(--line);color:var(--ink)}
+.msg{font-size:.9rem;min-height:1.3em;margin:0}
+
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);
+  padding:6px 0 calc(6px + env(safe-area-inset-bottom,0));display:grid;grid-template-columns:repeat(3,1fr)}
+nav button{border:0;background:none;padding:10px 0;font-weight:600;color:var(--muted);font-size:.95rem}
+nav button[aria-current="page"]{color:var(--ink)}
+@media (prefers-reduced-motion: no-preference){ .arc{transition:stroke .4s} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Chauffage</h1>
+    <span class="pill" id="conn">Mode démo</span>
+  </header>
+
+  <div class="rooms" id="rooms" role="group" aria-label="Pièce"></div>
+
+  <!-- THERMOSTAT -->
+  <section id="tab-thermo">
+    <div class="dial" id="dial" aria-label="Consigne de température">
+      <svg viewBox="0 0 280 280" id="dialSvg"></svg>
+      <div class="center">
+        <div class="now" id="now">–</div>
+        <div class="sp">Consigne <b id="sp">–</b></div>
+      </div>
+    </div>
+    <div class="adjust">
+      <button id="minus" aria-label="Baisser la consigne">−</button>
+      <button id="plus" aria-label="Monter la consigne">+</button>
+    </div>
+    <p class="status" id="status"></p>
+    <div class="modes" id="modes" role="group" aria-label="Mode"></div>
+    <p class="hint" id="modeHint"></p>
+  </section>
+
+  <!-- INFOS -->
+  <section id="tab-infos" hidden>
+    <h2>Dernières 24 h</h2>
+    <div class="stats">
+      <div class="stat"><strong id="stTime">–</strong><span>de chauffe</span></div>
+      <div class="stat"><strong id="stKwh">–</strong><span>consommés</span></div>
+      <div class="stat"><strong id="stCost">–</strong><span>estimés</span></div>
+    </div>
+    <p class="total" id="stTotal"></p>
+    <h2>Température</h2>
+    <div class="chart">
+      <svg viewBox="0 0 600 220" id="chart" role="img" aria-label="Courbe de température sur 24 heures"></svg>
+      <div class="legend"><span><i style="background:var(--ink)"></i>Température</span><span><i style="background:var(--heat-soft);outline:1px solid var(--heat)"></i>Chauffe</span><span><i style="background:var(--muted)"></i>Consigne</span></div>
+    </div>
+    <h2>Déclenchements</h2>
+    <ul class="log" id="log"></ul>
+  </section>
+
+  <!-- RÉGLAGES -->
+  <section id="tab-reglages" hidden>
+    <h2>Radiateurs</h2>
+    <form id="form">
+      <div class="row2">
+        <label>Puissance chambre (W)<input type="number" name="p_chambre" min="0" step="50"></label>
+        <label>Puissance salon (W)<input type="number" name="p_salon" min="0" step="50"></label>
+      </div>
+      <div class="row2">
+        <label>Prix du kWh (€)<input type="number" name="price" min="0" step="0.0001"></label>
+        <label>Écart avant relance (°C)<input type="number" name="hyst" min="0.1" max="2" step="0.1"></label>
+      </div>
+      <h2 style="margin:12px 0 0">Connexion</h2>
+      <label>Adresse du Worker<input type="url" name="workerUrl" placeholder="https://chauffage.nathanbbd.workers.dev"></label>
+      <label>Code d’accès<input type="password" name="token" autocomplete="off"></label>
+      <label class="check"><input type="checkbox" name="demo">Utiliser des données simulées</label>
+      <div class="btns">
+        <button type="button" class="btn alt" id="test">Tester la connexion</button>
+        <button type="submit" class="btn">Enregistrer</button>
+      </div>
+      <p class="msg" id="msg"></p>
+    </form>
+  </section>
+</div>
+
+<nav>
+  <button data-tab="thermo" aria-current="page">Thermostat</button>
+  <button data-tab="infos">Infos</button>
+  <button data-tab="reglages">Réglages</button>
+</nav>
+
+<script>
+/* =========================================================
+   CONFIG
+   ========================================================= */
+const ROOMS = [{ id: 'chambre', name: 'Chambre' }, { id: 'salon', name: 'Salon' }];
+const MODES = [
+  { id: 'auto',     label: 'Auto',     hint: 'L’app regarde le thermomètre et passe le radiateur en Confort ou en Hors-gel pour tenir la consigne.' },
+  { id: 'confort',  label: 'Confort',  hint: 'Le radiateur suit son propre bouton (7/8). L’app ne régule plus.' },
+  { id: 'eco',      label: 'Eco',      hint: 'Consigne du bouton moins 3 à 4 °C. Pratique pour la nuit.' },
+  { id: 'horsgel',  label: 'Hors-gel', hint: 'Chauffage coupé, le radiateur ne protège que du gel.' },
+];
+const DIAL_MIN = 14, DIAL_MAX = 26, SP_MIN = 15, SP_MAX = 25;
+const DEFAULTS = { demo: true, workerUrl: '', token: '', price: 0.20, hyst: 0.5, power: { chambre: 1000, salon: 1500 } };
+
+const store = {
+  load() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('chauffage') || '{}') }; } catch { return { ...DEFAULTS }; } },
+  save(c) { try { localStorage.setItem('chauffage', JSON.stringify(c)); } catch {} },
+};
+let cfg = store.load();
+
+/* =========================================================
+   API — contrat attendu du Worker
+   GET  /rooms            → [{ id, temp, setpoint, mode, heating, updated }]
+   POST /rooms/:id        ← { setpoint?, mode? }  → room
+   GET  /history?hours=24 → { chambre:[{ t, temp, sp, heating }], salon:[…] }  (pas de 5 min)
+   GET  /events?limit=40  → [{ t, room, type:'on'|'off'|'mode'|'setpoint', temp, reason }]
+   ========================================================= */
+async function req(path, opts = {}) {
+  const r = await fetch(cfg.workerUrl.replace(/\/$/, '') + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.token, ...(opts.headers || {}) },
+  });
+  if (!r.ok) throw new Error('Le Worker a répondu ' + r.status);
+  return r.json();
+}
+const api = {
+  rooms:   ()          => cfg.demo ? mock.rooms()         : req('/rooms'),
+  set:     (id, patch) => cfg.demo ? mock.set(id, patch)  : req('/rooms/' + id, { method: 'POST', body: JSON.stringify(patch) }),
+  history: ()          => cfg.demo ? mock.history()       : req('/history?hours=24'),
+  events:  ()          => cfg.demo ? mock.events()        : req('/events?limit=40'),
+};
+
+/* =========================================================
+   MOCK — simule 24 h d'historique puis la régulation en direct
+   (le vrai Worker fera la même logique dans son Cron)
+   ========================================================= */
+const mock = (() => {
+  const STEP = 5 * 60e3, state = {}, hist = {}, evts = [];
+  const schedule = h => ((h >= 7 && h < 9) || (h >= 18 && h < 23)) ? 20.5 : 18.5;
+  const regulate = (s, sp) => {
+    const half = cfg.hyst / 2;
+    if (s.mode === 'auto') { if (s.temp < sp - half) return true; if (s.temp > sp + half) return false; return s.heating; }
+    if (s.mode === 'confort') return s.temp < 24.5;
+    if (s.mode === 'eco') return s.temp < 21;
+    return false;
+  };
+  const now = Date.now();
+  ROOMS.forEach((r, i) => {
+    const s = { id: r.id, temp: 18.4 + i * 0.5, setpoint: 20.5, mode: 'auto', heating: false, updated: now };
+    hist[r.id] = [];
+    for (let k = 287; k >= 0; k--) {
+      const t = now - k * STEP, sp = schedule(new Date(t).getHours());
+      const was = s.heating;
+      s.heating = regulate(s, sp);
+      if (was !== s.heating) evts.push({ t, room: r.id, type: s.heating ? 'on' : 'off', temp: s.temp, reason: 'auto' });
+      s.temp += (s.heating ? 0.11 : -0.035) + (Math.random() - 0.5) * 0.02;
+      hist[r.id].push({ t, temp: +s.temp.toFixed(2), sp, heating: s.heating });
+    }
+    s.setpoint = schedule(new Date(now).getHours());
+    state[r.id] = s;
+  });
+  setInterval(() => {
+    ROOMS.forEach(r => {
+      const s = state[r.id], was = s.heating;
+      s.heating = regulate(s, s.setpoint);
+      if (was !== s.heating) evts.push({ t: Date.now(), room: r.id, type: s.heating ? 'on' : 'off', temp: s.temp, reason: s.mode });
+      s.temp += (s.heating ? 0.04 : -0.015) + (Math.random() - 0.5) * 0.01;
+      s.updated = Date.now();
+    });
+  }, 3000);
+  const clone = x => JSON.parse(JSON.stringify(x));
+  return {
+    rooms: async () => clone(ROOMS.map(r => state[r.id])),
+    set: async (id, p) => {
+      const s = state[id];
+      if (p.mode && p.mode !== s.mode) evts.push({ t: Date.now(), room: id, type: 'mode', temp: s.temp, reason: p.mode });
+      if (p.setpoint != null && p.setpoint !== s.setpoint) evts.push({ t: Date.now(), room: id, type: 'setpoint', temp: p.setpoint, reason: 'manuel' });
+      Object.assign(s, p);
+      return clone(s);
+    },
+    history: async () => clone(hist),
+    events: async () => clone(evts.slice(-40).reverse()),
+  };
+})();
+
+/* =========================================================
+   UTILS
+   ========================================================= */
+const $ = s => document.querySelector(s);
+const fmt = (n, d = 1) => n.toFixed(d).replace('.', ',');
+const hhmm = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const roomName = id => ROOMS.find(r => r.id === id)?.name ?? id;
+
+/* =========================================================
+   STATE + UI
+   ========================================================= */
+let rooms = {}, current = 'chambre', tab = 'thermo', dragging = false, pendingSp = null;
+
+function renderRooms() {
+  $('#rooms').innerHTML = ROOMS.map(r => {
+    const on = rooms[r.id]?.heating;
+    return `<button data-room="${r.id}" aria-pressed="${r.id === current}"><span class="dot ${on ? 'on' : ''}"></span>${r.name}</button>`;
+  }).join('');
+}
+$('#rooms').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  current = b.dataset.room; renderAll();
+});
+
+/* --- Cadran --- */
+const C = 140, R = 116;
+const angleOf = v => 135 + (clamp(v, DIAL_MIN, DIAL_MAX) - DIAL_MIN) / (DIAL_MAX - DIAL_MIN) * 270;
+const pt = a => [C + R * Math.cos(a * Math.PI / 180), C + R * Math.sin(a * Math.PI / 180)];
+function arc(a1, a2) {
+  if (a2 - a1 < 0.5) a2 = a1 + 0.5;
+  const [x1, y1] = pt(a1), [x2, y2] = pt(a2);
+  return `M${x1} ${y1} A${R} ${R} 0 ${a2 - a1 > 180 ? 1 : 0} 1 ${x2} ${y2}`;
+}
+function renderDial() {
+  const s = rooms[current]; if (!s) return;
+  const sp = pendingSp ?? s.setpoint;
+  const color = s.heating ? 'var(--heat)' : (s.mode === 'horsgel' ? 'var(--cool)' : 'var(--idle)');
+  const ticks = [];
+  for (let v = DIAL_MIN; v <= DIAL_MAX; v++) {
+    const a = angleOf(v) * Math.PI / 180, r1 = R + 14, r2 = v % 2 ? R + 17 : R + 20;
+    ticks.push(`<line x1="${C + r1 * Math.cos(a)}" y1="${C + r1 * Math.sin(a)}" x2="${C + r2 * Math.cos(a)}" y2="${C + r2 * Math.sin(a)}" stroke="var(--line)" stroke-width="2" stroke-linecap="round"/>`);
+  }
+  const [kx, ky] = pt(angleOf(sp));
+  $('#dialSvg').innerHTML = `
+    ${ticks.join('')}
+    <path d="${arc(135, 405)}" fill="none" stroke="var(--line)" stroke-width="14" stroke-linecap="round"/>
+    <path class="arc" d="${arc(135, angleOf(s.temp))}" fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round"/>
+    <circle class="knob" cx="${kx}" cy="${ky}" r="15" fill="var(--surface)" stroke="var(--ink)" stroke-width="3"/>
+    <text x="${pt(135)[0] - 2}" y="${pt(135)[1] + 30}" font-size="12" fill="var(--muted)" text-anchor="middle">${DIAL_MIN}°</text>
+    <text x="${pt(405)[0] + 2}" y="${pt(405)[1] + 30}" font-size="12" fill="var(--muted)" text-anchor="middle">${DIAL_MAX}°</text>`;
+  $('#now').innerHTML = `${fmt(s.temp)}<sup>°</sup>`;
+  $('#sp').textContent = `${fmt(sp)} °C`;
+  const st = $('#status');
+  st.className = 'status' + (s.heating ? ' on' : '');
+  st.textContent = {
+    auto: s.heating ? `Chauffe pour atteindre ${fmt(sp)} °C` : `Consigne tenue, radiateur au repos`,
+    confort: 'Confort forcé, le bouton du radiateur décide',
+    eco: 'Eco forcé',
+    horsgel: 'Chauffage coupé',
+  }[s.mode];
+  $('#minus').disabled = $('#plus').disabled = s.mode !== 'auto';
+  $('#dial').style.opacity = s.mode === 'auto' ? 1 : .55;
+}
+
+function setpointFromPointer(e) {
+  const box = $('#dialSvg').getBoundingClientRect();
+  const x = (e.clientX - box.left) / box.width * 280, y = (e.clientY - box.top) / box.height * 280;
+  let rel = ((Math.atan2(y - C, x - C) * 180 / Math.PI) - 135 + 720) % 360;
+  if (rel > 270) rel = rel > 315 ? 0 : 270;
+  const v = DIAL_MIN + rel / 270 * (DIAL_MAX - DIAL_MIN);
+  return clamp(Math.round(v * 2) / 2, SP_MIN, SP_MAX);
+}
+const dialEl = $('#dial');
+dialEl.addEventListener('pointerdown', e => {
+  if (rooms[current]?.mode !== 'auto') return;
+  dragging = true; dialEl.setPointerCapture(e.pointerId);
+  pendingSp = setpointFromPointer(e); renderDial();
+});
+dialEl.addEventListener('pointermove', e => { if (!dragging) return; pendingSp = setpointFromPointer(e); renderDial(); });
+dialEl.addEventListener('pointerup', () => { if (!dragging) return; dragging = false; commitSetpoint(pendingSp); });
+
+let spTimer;
+function nudge(d) {
+  const s = rooms[current]; if (!s || s.mode !== 'auto') return;
+  pendingSp = clamp((pendingSp ?? s.setpoint) + d, SP_MIN, SP_MAX); renderDial();
+  clearTimeout(spTimer); spTimer = setTimeout(() => commitSetpoint(pendingSp), 700);
+}
+$('#minus').onclick = () => nudge(-0.5);
+$('#plus').onclick = () => nudge(0.5);
+async function commitSetpoint(v) {
+  try { rooms[current] = await api.set(current, { setpoint: v }); } catch (err) { showConn(err); }
+  pendingSp = null; renderAll();
+}
+
+/* --- Modes --- */
+function renderModes() {
+  const s = rooms[current]; if (!s) return;
+  $('#modes').innerHTML = MODES.map(m => `<button data-mode="${m.id}" aria-pressed="${s.mode === m.id}">${m.label}</button>`).join('');
+  $('#modeHint').textContent = MODES.find(m => m.id === s.mode).hint;
+}
+$('#modes').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  try { rooms[current] = await api.set(current, { mode: b.dataset.mode }); } catch (err) { showConn(err); }
+  renderAll();
+});
+
+/* --- Infos --- */
+async function renderInfos() {
+  let hist, evts;
+  try { [hist, evts] = await Promise.all([api.history(), api.events()]); } catch (err) { showConn(err); return; }
+  const cost = id => {
+    const pts = hist[id] || [];
+    const hours = pts.filter(p => p.heating).length * 5 / 60;
+    const kwh = hours * (cfg.power[id] || 0) / 1000;
+    return { hours, kwh, eur: kwh * cfg.price };
+  };
+  const c = cost(current);
+  $('#stTime').textContent = `${Math.floor(c.hours)} h ${String(Math.round(c.hours % 1 * 60)).padStart(2, '0')}`;
+  $('#stKwh').textContent = `${fmt(c.kwh)} kWh`;
+  $('#stCost').textContent = `${fmt(c.eur, 2)} €`;
+  const all = ROOMS.reduce((s, r) => s + cost(r.id).eur, 0);
+  $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € sur 24 h, soit environ ${Math.round(all * 30)} € par mois à ce rythme.`;
+
+  // Courbe
+  const pts = hist[current] || [];
+  const W = 600, H = 220, L = 34, B = 24, T = 10;
+  if (!pts.length) { $('#chart').innerHTML = ''; return; }
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const vals = pts.flatMap(p => [p.temp, p.sp]);
+  const lo = Math.floor(Math.min(...vals) - .5), hi = Math.ceil(Math.max(...vals) + .5);
+  const X = t => L + (t - t0) / (t1 - t0 || 1) * (W - L - 6);
+  const Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  let svg = '';
+  // périodes de chauffe
+  let start = null;
+  pts.forEach((p, i) => {
+    if (p.heating && start === null) start = p.t;
+    if ((!p.heating || i === pts.length - 1) && start !== null) {
+      svg += `<rect x="${X(start)}" y="${T}" width="${Math.max(1, X(p.t) - X(start))}" height="${H - T - B}" fill="var(--heat-soft)"/>`;
+      start = null;
+    }
+  });
+  for (let v = lo; v <= hi; v++) {
+    svg += `<line x1="${L}" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1"/>`;
+    svg += `<text x="${L - 6}" y="${Y(v) + 4}" font-size="11" fill="var(--muted)" text-anchor="end">${v}°</text>`;
+  }
+  for (let t = Math.ceil(t0 / 216e5) * 216e5; t <= t1; t += 216e5) {
+    svg += `<text x="${X(t)}" y="${H - 6}" font-size="11" fill="var(--muted)" text-anchor="middle">${hhmm(t).slice(0, 2)} h</text>`;
+  }
+  svg += `<polyline fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" points="${pts.map(p => `${X(p.t)},${Y(p.sp)}`).join(' ')}"/>`;
+  svg += `<polyline fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linejoin="round" points="${pts.map(p => `${X(p.t)},${Y(p.temp)}`).join(' ')}"/>`;
+  $('#chart').innerHTML = svg;
+
+  // Journal
+  const label = e => ({
+    on: 'Chauffe lancée', off: 'Chauffe coupée',
+    mode: `Mode ${MODES.find(m => m.id === e.reason)?.label ?? e.reason}`,
+    setpoint: 'Consigne modifiée',
+  }[e.type]);
+  const list = evts.filter(e => e.room === current);
+  $('#log').innerHTML = list.length
+    ? list.map(e => `<li><time>${hhmm(e.t)}</time><span>${label(e)}</span><span class="t">${fmt(e.temp)} °C</span></li>`).join('')
+    : `<li class="empty">Aucun déclenchement pour ${roomName(current)} sur la période.</li>`;
+}
+
+/* --- Réglages --- */
+function fillForm() {
+  const f = $('#form');
+  f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon;
+  f.price.value = cfg.price; f.hyst.value = cfg.hyst;
+  f.workerUrl.value = cfg.workerUrl; f.token.value = cfg.token; f.demo.checked = cfg.demo;
+}
+function readForm() {
+  const f = $('#form');
+  return {
+    power: { chambre: +f.p_chambre.value || 0, salon: +f.p_salon.value || 0 },
+    price: +f.price.value || 0, hyst: +f.hyst.value || 0.5,
+    workerUrl: f.workerUrl.value.trim(), token: f.token.value, demo: f.demo.checked,
+  };
+}
+$('#form').addEventListener('submit', e => {
+  e.preventDefault();
+  cfg = readForm(); store.save(cfg);
+  $('#msg').textContent = 'Réglages enregistrés.'; refresh();
+});
+$('#test').onclick = async () => {
+  const prev = cfg; cfg = { ...readForm(), demo: false };
+  $('#msg').textContent = 'Connexion au Worker…';
+  try { const r = await api.rooms(); $('#msg').textContent = `Connecté, ${r.length} pièce(s) trouvée(s).`; }
+  catch (err) { $('#msg').textContent = cfg.workerUrl ? `Échec : ${err.message}. Vérifie l’adresse et le code d’accès.` : 'Renseigne l’adresse du Worker.'; }
+  cfg = prev;
+};
+
+/* --- Navigation --- */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll('nav button').forEach(x => x.toggleAttribute('aria-current', x === b));
+  b.setAttribute('aria-current', 'page');
+  ['thermo', 'infos', 'reglages'].forEach(t => $('#tab-' + t).hidden = t !== tab);
+  $('#rooms').hidden = tab === 'reglages';
+  if (tab === 'infos') renderInfos();
+  if (tab === 'reglages') fillForm();
+});
+
+/* --- Connexion --- */
+function showConn(err) {
+  const p = $('#conn');
+  if (cfg.demo) { p.textContent = 'Mode démo'; p.className = 'pill'; return; }
+  if (err) { p.textContent = 'Worker injoignable'; p.className = 'pill warn'; return; }
+  const last = Math.max(...Object.values(rooms).map(r => r.updated || 0));
+  const min = Math.round((Date.now() - last) / 60e3);
+  p.textContent = min < 1 ? 'À jour' : `Relevé il y a ${min} min`;
+  p.className = 'pill' + (min > 15 ? ' warn' : '');
+}
+
+function renderAll() { renderRooms(); renderDial(); renderModes(); if (tab === 'infos') renderInfos(); }
+async function refresh() {
+  try {
+    const list = await api.rooms();
+    rooms = Object.fromEntries(list.map(r => [r.id, r]));
+    showConn();
+  } catch (err) { showConn(err); }
+  if (!dragging && pendingSp === null) renderAll();
+}
+refresh();
+setInterval(refresh, cfg.demo ? 3000 : 30000);
+</script>
+</body>
+</html>
