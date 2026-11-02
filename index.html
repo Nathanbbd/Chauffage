@@ -25,7 +25,7 @@ html,body{margin:0;min-height:100%;overflow-x:hidden}
 form label{min-width:0}
 form input:not([type=checkbox]),form select{width:100%;min-width:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-size:16px;line-height:1.45;
-  padding:env(safe-area-inset-top,0) 0 calc(76px + env(safe-area-inset-bottom,0));-webkit-font-smoothing:antialiased}
+  padding:env(safe-area-inset-top,0px) 0 0;-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
 html,body,button,input,select{touch-action:manipulation}
 input,select{font-size:16px}
@@ -116,8 +116,9 @@ nav button{border:0;background:none;padding:10px 0;font-weight:600;color:var(--m
 nav button[aria-current="page"]{color:var(--ink)}
 /* Onglet Thermostat : tout tient dans l'écran, le cadran s'adapte à la hauteur dispo */
 body.fit .wrap{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))}
-body.fit .dial{width:min(82vw, clamp(150px, calc(100svh - 510px), 300px))}
-body.fit .now{font-size:clamp(3.2rem, calc((100svh - 510px) * .25), 4.6rem)}
+body.fit .dial{width:min(82vw, clamp(150px, calc(100svh - 434px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)), 300px))}
+body.fit .now{font-size:clamp(3.2rem, calc((100svh - 434px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)) * .25), 4.6rem)}
+body.fit{overscroll-behavior:none}
 body.fit .status{margin-top:12px}
 body.fit .modes{margin-top:14px}
 @media (prefers-reduced-motion: no-preference){ .arc{transition:stroke .4s} }
