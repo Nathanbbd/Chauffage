@@ -207,7 +207,12 @@ nav button[aria-current="page"]{color:var(--ink)}
         <label>Puissance salon (W)<input type="number" name="p_salon" min="0" step="50"></label>
         <label>Puissance chambre (W)<input type="number" name="p_chambre" min="0" step="50"></label>
       </div>
-      <label>Prix du kWh (€)<input type="number" name="price" min="0" step="0.0001"></label>
+      <div class="row2">
+        <label>Prix heures pleines (€/kWh)<input type="number" name="priceHP" min="0" step="0.0001"></label>
+        <label>Prix heures creuses (€/kWh)<input type="number" name="priceHC" min="0" step="0.0001"></label>
+      </div>
+      <label>Plages heures creuses<input type="text" name="hc" placeholder="22:00-06:00 ou 01:30-07:30, 12:30-14:30" autocomplete="off"></label>
+      <p class="hint" style="margin-top:-4px">Indiquées sur ta facture ou ton espace client. Plusieurs plages : sépare-les par une virgule.</p>
       <h2 style="margin:12px 0 0">Régulation</h2>
       <label>Quand couper le chauffage
         <select name="band">
@@ -348,13 +353,14 @@ const MODES = [
 const PLANS = [{ id: 'semaine', name: 'Du lundi au vendredi' }, { id: 'weekend', name: 'Samedi et dimanche' }];
 const SETTINGS_PIN = '1224'; // verrou d'interface, pas une vraie sécurité
 const DIAL_MIN = 14, DIAL_MAX = 26, SP_MIN = 15, SP_MAX = 25;
-const DEFAULTS = { demo: true, workerUrl: '', token: '', price: 0.20, power: { chambre: 1000, salon: 1500 } };
+const DEFAULTS = { demo: true, workerUrl: '', token: '', priceHP: 0.2142, priceHC: 0.1589, hc: '00:00-06:00, 15:00-17:00', power: { chambre: 1500, salon: 1500 } };
 
 const store = {
   load() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('chauffage') || '{}') }; } catch { return { ...DEFAULTS }; } },
   save(c) { try { localStorage.setItem('chauffage', JSON.stringify(c)); } catch {} },
 };
 let cfg = store.load();
+if (cfg.priceHP == null) cfg = { ...cfg, priceHP: DEFAULTS.priceHP, priceHC: DEFAULTS.priceHC, hc: DEFAULTS.hc };
 
 /* =========================================================
    API (contrat du Worker, voir worker/src/index.js)
@@ -451,6 +457,17 @@ const $ = s => document.querySelector(s);
 const fmt = (n, d = 0) => Number(n).toFixed(d).replace('.', ',');
 const hhmm = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+// Heures creuses : "22:00-06:00, 12:30-14:30" → la minute (heure de Paris) tombe-t-elle dans une plage ?
+function isOffPeak(t) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date(t)).map(x => [x.type, x.value]));
+  const m = +p.hour * 60 + +p.minute;
+  return String(cfg.hc || '').split(',').some(r => {
+    const x = r.trim().match(/^(\d{1,2})[:h](\d{2})\s*-\s*(\d{1,2})[:h](\d{2})$/); if (!x) return false;
+    const a = +x[1] * 60 + +x[2], b = +x[3] * 60 + +x[4];
+    return a <= b ? m >= a && m < b : m >= a || m < b;
+  });
+}
 const roomName = id => ROOMS.find(r => r.id === id)?.name ?? id;
 const profName = id => PROFILES.find(p => p.id === id)?.name ?? id;
 const spText = v => (typeof v === 'number' ? `${fmt(v)} °C` : 'Hors-gel');
@@ -673,10 +690,10 @@ async function renderInfos() {
   try { [hist, evts] = await Promise.all([api.history(), api.events()]); } catch (err) { showConn(err); return; }
   const step = pts => pts.length > 1 ? (pts[pts.length - 1].t - pts[0].t) / (pts.length - 1) / 36e5 : 5 / 60;
   const cost = id => {
-    const pts = hist[id] || [];
-    const hours = pts.filter(p => p.heating).length * step(pts);
-    const kwh = hours * (cfg.power[id] || 0) / 1000;
-    return { hours, kwh, eur: kwh * cfg.price };
+    const pts = hist[id] || [], h = step(pts), kw = (cfg.power[id] || 0) / 1000;
+    let hours = 0, eur = 0;
+    for (const p of pts) if (p.heating) { hours += h; eur += h * kw * (isOffPeak(p.t) ? cfg.priceHC : cfg.priceHP); }
+    return { hours, kwh: hours * kw, eur };
   };
   const c = cost(current);
   $('#stTime').textContent = `${Math.floor(c.hours)} h ${String(Math.round(c.hours % 1 * 60)).padStart(2, '0')}`;
@@ -752,14 +769,15 @@ async function fillForm() {
   f.hyst.value = regSched?.hyst ?? 1;
   f.band.value = regSched?.centered ? 'centre' : 'eco';
   updateBandHint();
-  f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon; f.price.value = cfg.price;
+  f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon;
+  f.priceHP.value = cfg.priceHP; f.priceHC.value = cfg.priceHC; f.hc.value = cfg.hc;
   f.workerUrl.value = cfg.workerUrl; f.token.value = cfg.token; f.demo.checked = cfg.demo;
 }
 function readForm() {
   const f = $('#form');
   return {
     power: { chambre: +f.p_chambre.value || 0, salon: +f.p_salon.value || 0 },
-    price: +f.price.value || 0, workerUrl: f.workerUrl.value.trim(), token: f.token.value, demo: f.demo.checked,
+    priceHP: +f.priceHP.value || 0, priceHC: +f.priceHC.value || 0, hc: f.hc.value.trim(), workerUrl: f.workerUrl.value.trim(), token: f.token.value, demo: f.demo.checked,
   };
 }
 $('#form').addEventListener('submit', async e => {
