@@ -118,13 +118,14 @@ nav button[aria-current="page"]{color:var(--ink)}
 body.fit .wrap{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))}
 body.fit .dial{width:min(82vw, clamp(150px, calc(100svh - 434px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)), 300px))}
 body.fit .now{font-size:clamp(3.2rem, calc((100svh - 434px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)) * .25), 4.6rem)}
-body.fit{overscroll-behavior:none}
+html.fit,body.fit{height:100%;overflow:hidden;overscroll-behavior:none}
 body.fit .status{margin-top:12px}
 body.fit .modes{margin-top:14px}
 @media (prefers-reduced-motion: no-preference){ .arc{transition:stroke .4s} }
 </style>
 </head>
 <body class="fit">
+<script>document.documentElement.classList.add('fit')</script>
 <div class="wrap">
   <header>
     <h1>Chauffage</h1>
@@ -807,6 +808,8 @@ $('#test').onclick = async () => {
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab;
   document.body.classList.toggle('fit', tab === 'thermo');
+  document.documentElement.classList.toggle('fit', tab === 'thermo');
+  window.scrollTo(0, 0);
   document.querySelectorAll('nav button').forEach(x => x === b ? x.setAttribute('aria-current', 'page') : x.removeAttribute('aria-current'));
   $('#rooms').hidden = tab === 'reglages' || tab === 'presence';
   const shown = tab === 'reglages' && !pinOk ? 'pin' : tab;
@@ -825,6 +828,9 @@ $('#pin').addEventListener('input', e => {
   else { $('#pinMsg').textContent = 'Code incorrect, réessaie.'; e.target.value = ''; }
 });
 $('#pinForm').addEventListener('submit', e => e.preventDefault());
+
+// iOS : bloque l'effet élastique sur le Thermostat (rien à faire défiler sur cet onglet)
+document.addEventListener('touchmove', e => { if (tab === 'thermo') e.preventDefault(); }, { passive: false });
 
 function showConn(err) {
   const p = $('#conn');
