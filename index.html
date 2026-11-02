@@ -113,10 +113,16 @@ nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:
 .add{width:100%;border:1px dashed var(--line);background:none;border-radius:10px;padding:9px;color:var(--muted);font-weight:600;margin-top:4px}
 nav button{border:0;background:none;padding:10px 0;font-weight:600;color:var(--muted);font-size:.95rem}
 nav button[aria-current="page"]{color:var(--ink)}
+/* Onglet Thermostat : tout tient dans l'écran, le cadran s'adapte à la hauteur dispo */
+body.fit .wrap{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))}
+body.fit .dial{width:min(82vw, clamp(150px, calc(100svh - 510px), 300px))}
+body.fit .now{font-size:clamp(3.2rem, calc((100svh - 510px) * .25), 4.6rem)}
+body.fit .status{margin-top:12px}
+body.fit .modes{margin-top:14px}
 @media (prefers-reduced-motion: no-preference){ .arc{transition:stroke .4s} }
 </style>
 </head>
-<body>
+<body class="fit">
 <div class="wrap">
   <header>
     <h1>Chauffage</h1>
@@ -230,6 +236,9 @@ nav button[aria-current="page"]{color:var(--ink)}
         <button type="submit" class="btn">Enregistrer</button>
       </div>
       <p class="msg" id="msg"></p>
+      <h2 style="margin:12px 0 0">Données</h2>
+      <button type="button" class="btn alt" id="resetHist" style="color:var(--heat);border-color:var(--heat)">Effacer l’historique des mesures</button>
+      <p class="hint" style="margin-top:-4px">Efface les relevés de température, la courbe et le journal des déclenchements, pour vous deux. Le planning, les consignes et les réglages sont conservés.</p>
     </form>
   </section>
 </div>
@@ -383,6 +392,7 @@ const api = {
   saveSchedule:   s             => cfg.demo ? mock.saveSchedule(s)         : post('/schedule', s, 'PUT'),
   presence:       ()            => cfg.demo ? mock.presence()              : req('/presence'),
   presenceAction: (action, until) => cfg.demo ? mock.presenceAction(action, until) : post('/presence', { action, until }),
+  resetHistory:   ()            => cfg.demo ? mock.resetHistory()          : post('/history/reset', {}),
 };
 
 /* =========================================================
@@ -447,6 +457,7 @@ const mock = (() => {
     saveSchedule: async s => { sched = structuredClone(s); tick(); return structuredClone(sched); },
     presence: async () => presenceView(),
     presenceAction: async (action, until) => { presence = presenceFor(action, sched, Date.now(), until); tick(); return presenceView(); },
+    resetHistory: async () => { ROOMS.forEach(r => { hist[r.id].length = 0; }); evts.length = 0; return { ok: true }; },
   };
 })();
 
@@ -792,6 +803,11 @@ $('#form').addEventListener('submit', async e => {
   }
   if (wasDemo !== cfg.demo) location.reload(); else refresh();
 });
+$('#resetHist').onclick = async () => {
+  if (!confirm('Effacer tout l’historique des mesures ? La courbe du dashboard repartira aussi de zéro. C’est définitif.')) return;
+  try { await api.resetHistory(); $('#msg').textContent = 'Historique effacé. Les nouvelles mesures arrivent dans les 5 minutes.'; }
+  catch (err) { $('#msg').textContent = `Échec : ${err.message}`; }
+};
 $('#test').onclick = async () => {
   const prev = cfg; cfg = { ...readForm(), demo: false };
   $('#msg').textContent = 'Connexion au Worker…';
@@ -805,6 +821,7 @@ $('#test').onclick = async () => {
    ========================================================= */
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab;
+  document.body.classList.toggle('fit', tab === 'thermo');
   document.querySelectorAll('nav button').forEach(x => x === b ? x.setAttribute('aria-current', 'page') : x.removeAttribute('aria-current'));
   const shown = tab === 'reglages' && !pinOk ? 'pin' : tab;
   ['thermo', 'presence', 'infos', 'reglages', 'pin'].forEach(t => $('#tab-' + t).hidden = t !== shown);
