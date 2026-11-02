@@ -42,6 +42,7 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .rooms button[aria-pressed="true"]{background:var(--bg);color:var(--ink)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
 .dot.on{background:var(--heat)}
+.dot.win{background:var(--cool)}
 
 [hidden]{display:none !important}
 .dial{position:relative;width:min(300px,82vw);margin:22px auto 4px;user-select:none;-webkit-user-select:none}
@@ -55,6 +56,7 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .adjust button{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.5rem;font-weight:600}
 .status{text-align:center;margin:18px 0 0;min-height:1.5em}
 .status.on{color:var(--heat)}
+.status.win{color:var(--cool)}
 
 .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:20px}
 .modes button{border:1px solid var(--line);background:none;border-radius:12px;padding:10px 4px;font-weight:600;font-size:.92rem}
@@ -230,6 +232,13 @@ body.fit .modes{margin-top:14px}
         </select></label>
       <label>Écart (°C)<input type="number" name="hyst" min="1" max="3" step="1"></label>
       <p class="hint" id="bandHint" style="margin-top:-4px"></p>
+      <label class="check"><input type="checkbox" name="winOn">Couper le chauffage si une fenêtre est ouverte</label>
+      <div class="row2">
+        <label>Si la pièce perd
+          <select name="winDrop"><option value="2">2 °C en 15 min</option><option value="3">3 °C en 15 min</option></select></label>
+        <label>Couper pendant
+          <select name="winMin"><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 h</option></select></label>
+      </div>
       <h2 style="margin:12px 0 0">Connexion</h2>
       <label>Adresse du Worker<input type="url" name="workerUrl" placeholder="https://tuya-appart.boisbourdinnathande.workers.dev"></label>
       <label>Code d’accès<input type="password" name="token" autocomplete="off"></label>
@@ -270,6 +279,7 @@ const PROFILES = [
 const DEFAULT_SCHEDULE = {
   hyst: 1,
   centered: false, // false : coupe à la consigne ; true : coupe à consigne + écart
+  windowDetect: true, windowDrop: 2, windowMinutes: 30, // fenêtre ouverte : chute de X °C en 15 min → coupe Y min
   profiles: {
     maison:   { chambre: 19, salon: 20 },
     nuit:     { chambre: 18, salon: 17 },
@@ -423,8 +433,16 @@ const mock = (() => {
     ROOMS.forEach(r => {
       const room = state[r.id];
       if (room.manualUntil && room.manualUntil <= t) room.manualSp = room.manualUntil = null;
+      if (room.windowUntil && Math.abs(room.windowUntil) <= t) room.windowUntil = null;
+      room.recent = (room.recent || []).filter(x => x.t > t - 16 * 60e3);
+      const mx = Math.max(...room.recent.map(x => x.temp));
+      if ((sched.windowDetect ?? true) && !room.windowUntil && room.mode !== 'horsgel' && mx - room.temp >= (sched.windowDrop ?? 2)) {
+        room.windowUntil = t + (sched.windowMinutes ?? 30) * 60e3;
+        evts.push({ t, room: r.id, type: 'window', temp: room.temp, reason: '' });
+      }
+      room.recent.push({ t, temp: room.temp });
       const tg = target(room, sched, presence, t);
-      const heating = decide(room, tg.sp, sched.hyst, sched.centered) === 'on';
+      const heating = room.windowUntil > 0 ? false : decide(room, tg.sp, sched.hyst, sched.centered) === 'on';
       if (heating !== room.heating) evts.push({ t, room: r.id, type: heating ? 'on' : 'off', temp: room.temp, reason: room.mode === 'auto' ? tg.profile : room.mode });
       room.heating = heating;
       room.temp += (heating ? 0.04 : -0.012) + (Math.random() - 0.5) * 0.01;
@@ -435,7 +453,8 @@ const mock = (() => {
   const view = room => {
     const tg = target(room, sched, presence, Date.now());
     return { id: room.id, temp: room.temp, setpoint: tg.sp, mode: room.mode, heating: room.heating, updated: room.updated,
-      profile: tg.profile, source: tg.source, until: tg.until, manual: tg.manual, manualUntil: room.manualUntil };
+      profile: tg.profile, source: tg.source, until: tg.until, manual: tg.manual, manualUntil: room.manualUntil,
+      window: room.windowUntil > Date.now() ? room.windowUntil : null };
   };
   const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until }; };
   return {
@@ -446,6 +465,10 @@ const mock = (() => {
         room.mode = p.mode;
         if (p.mode === 'auto') room.manualSp = room.manualUntil = null;
         evts.push({ t, room: id, type: 'mode', temp: room.temp, reason: p.mode });
+      }
+      if (p.window === false && room.windowUntil > 0) {
+        room.windowUntil = -(t + 16 * 60e3);
+        evts.push({ t, room: id, type: 'window_end', temp: room.temp, reason: 'manuel' });
       }
       if (typeof p.setpoint === 'number') {
         const base = target({ ...room, manualSp: null }, sched, presence, t);
@@ -501,7 +524,7 @@ let draft = null, pres = null;
 /* --- Sélecteur de pièce --- */
 function renderRooms() {
   $('#rooms').innerHTML = ROOMS.map(r =>
-    `<button data-room="${r.id}" aria-pressed="${r.id === current}"><span class="dot ${rooms[r.id]?.heating ? 'on' : ''}"></span>${r.name}</button>`).join('');
+    `<button data-room="${r.id}" aria-pressed="${r.id === current}"><span class="dot ${rooms[r.id]?.window ? 'win' : rooms[r.id]?.heating ? 'on' : ''}"></span>${r.name}</button>`).join('');
 }
 $('#rooms').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -522,7 +545,7 @@ function arc(a1, a2) {
 function renderDial() {
   const s = rooms[current]; if (!s) return;
   const sp = pendingSp ?? s.setpoint;
-  const color = s.heating ? 'var(--heat)' : (sp == null || s.mode === 'horsgel' ? 'var(--cool)' : 'var(--idle)');
+  const color = s.heating ? 'var(--heat)' : (s.window || sp == null || s.mode === 'horsgel' ? 'var(--cool)' : 'var(--idle)');
   const ticks = [];
   for (let v = DIAL_MIN; v <= DIAL_MAX; v++) {
     const a = angleOf(v) * Math.PI / 180, r1 = R + 14, r2 = v % 2 ? R + 17 : R + 20;
@@ -549,9 +572,11 @@ function renderDial() {
     eco: 'Eco forcé',
     horsgel: 'Chauffage coupé',
   }[s.mode];
+  if (s.window) { st.className = 'status win'; st.textContent = `Fenêtre ouverte, chauffage coupé jusqu’à ${hhmm(s.window)}`; }
 
   const pl = $('#profline');
-  if (s.mode !== 'auto') pl.innerHTML = '';
+  if (s.window) pl.innerHTML = `<button class="linkbtn" id="windowClosed">C’est fermé, reprendre le chauffage</button>`;
+  else if (s.mode !== 'auto') pl.innerHTML = '';
   else if (s.manual) pl.innerHTML = `Consigne manuelle ${untilText(s.manualUntil)}<button class="linkbtn" id="backProfile">Revenir au profil</button>`;
   else pl.textContent = `${profName(s.profile)} ${untilText(s.until, s.source)}`.trim();
 
@@ -559,8 +584,9 @@ function renderDial() {
   $('#dial').style.opacity = s.mode === 'auto' ? 1 : .55;
 }
 $('#profline').addEventListener('click', async e => {
-  if (e.target.id !== 'backProfile') return;
-  try { rooms[current] = await api.set(current, { mode: 'auto' }); } catch (err) { showConn(err); }
+  const patch = e.target.id === 'backProfile' ? { mode: 'auto' } : e.target.id === 'windowClosed' ? { window: false } : null;
+  if (!patch) return;
+  try { rooms[current] = await api.set(current, patch); } catch (err) { showConn(err); }
   renderAll();
 });
 
@@ -744,6 +770,7 @@ async function renderInfos() {
     on: 'Chauffe lancée', off: 'Chauffe coupée',
     mode: `Mode ${MODES.find(m => m.id === e.reason)?.label ?? e.reason}`,
     setpoint: 'Consigne modifiée',
+    window: 'Fenêtre ouverte détectée', window_end: 'Fenêtre fermée',
   }[e.type]);
   const list = evts.filter(e => e.room === current);
   $('#log').innerHTML = list.length
@@ -765,6 +792,9 @@ async function fillForm() {
   try { regSched = await api.schedule(); } catch { regSched = null; }
   f.hyst.value = regSched?.hyst ?? 1;
   f.band.value = regSched?.centered ? 'centre' : 'eco';
+  f.winOn.checked = regSched?.windowDetect ?? true;
+  f.winDrop.value = String(regSched?.windowDrop ?? 2);
+  f.winMin.value = String(regSched?.windowMinutes ?? 30);
   updateBandHint();
   f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon;
   f.priceHP.value = cfg.priceHP; f.priceHC.value = cfg.priceHC; f.hc.value = cfg.hc;
@@ -780,11 +810,17 @@ function readForm() {
 $('#form').addEventListener('submit', async e => {
   e.preventDefault();
   const f = $('#form'), wasDemo = cfg.demo;
-  const hyst = Math.max(1, Math.round(+f.hyst.value || 1)), centered = f.band.value === 'centre';
+  const reg = {
+    hyst: Math.max(1, Math.round(+f.hyst.value || 1)), centered: f.band.value === 'centre',
+    windowDetect: f.winOn.checked, windowDrop: +f.winDrop.value, windowMinutes: +f.winMin.value,
+  };
   cfg = readForm(); store.save(cfg);
   $('#msg').textContent = 'Réglages enregistrés.';
-  if (wasDemo === cfg.demo && regSched && (regSched.hyst !== hyst || !!regSched.centered !== centered)) {
-    try { regSched = await api.saveSchedule({ ...regSched, hyst, centered }); }
+  const changed = regSched && (regSched.hyst !== reg.hyst || !!regSched.centered !== reg.centered
+    || (regSched.windowDetect ?? true) !== reg.windowDetect || (regSched.windowDrop ?? 2) !== reg.windowDrop
+    || (regSched.windowMinutes ?? 30) !== reg.windowMinutes);
+  if (wasDemo === cfg.demo && changed) {
+    try { regSched = await api.saveSchedule({ ...regSched, ...reg }); }
     catch (err) { $('#msg').textContent = `Enregistré sur ce téléphone, mais la régulation n’a pas pu être envoyée : ${err.message}`; }
   }
   if (wasDemo !== cfg.demo) location.reload(); else refresh();
