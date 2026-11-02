@@ -53,7 +53,10 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .now sup{font-size:1.6rem;font-weight:600;vertical-align:top;margin-left:2px}
 .sp{color:var(--muted);margin-top:6px}
 .sp b{color:var(--ink);font-weight:600}
-.adjust{display:flex;justify-content:center;gap:56px;margin-top:-6px}
+.adjust{display:flex;justify-content:center;align-items:center;gap:14px;margin-top:-6px}
+.adjust .boost{width:auto;height:44px;padding:0 16px;border-radius:22px;border:1.5px solid var(--heat);background:none;color:var(--heat);font-size:.95rem;font-weight:600;min-width:132px}
+.adjust .boost.on{background:var(--heat);color:#fff}
+.adjust .boost:disabled{opacity:.4}
 .adjust button{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.5rem;font-weight:600}
 .status{text-align:center;margin:18px 0 0;min-height:1.5em}
 .status.on{color:var(--heat)}
@@ -152,6 +155,7 @@ body.fit .modes{margin-top:14px}
     </div>
     <div class="adjust">
       <button id="minus" aria-label="Baisser la consigne">−</button>
+      <button id="boost" class="boost">Boost 30 min</button>
       <button id="plus" aria-label="Monter la consigne">+</button>
     </div>
     <p class="status" id="status"></p>
@@ -442,6 +446,7 @@ const mock = (() => {
       const room = state[r.id];
       if (room.manualUntil && room.manualUntil <= t) room.manualSp = room.manualUntil = null;
       if (room.windowUntil && Math.abs(room.windowUntil) <= t) room.windowUntil = null;
+      if (room.boostUntil && room.boostUntil <= t) room.boostUntil = null;
       room.recent = (room.recent || []).filter(x => x.t > t - 16 * 60e3);
       const mx = Math.max(...room.recent.map(x => x.temp));
       if ((sched.windowDetect ?? true) && !room.windowUntil && room.mode !== 'horsgel' && mx - room.temp >= (sched.windowDrop ?? 2)) {
@@ -450,7 +455,7 @@ const mock = (() => {
       }
       room.recent.push({ t, temp: room.temp });
       const tg = target(room, sched, presence, t);
-      const heating = room.windowUntil > 0 ? false : decide(room, tg.sp, sched.hyst, sched.centered) === 'on';
+      const heating = room.windowUntil > 0 ? false : room.boostUntil ? true : decide(room, tg.sp, sched.hyst, sched.centered) === 'on';
       if (heating !== room.heating) evts.push({ t, room: r.id, type: heating ? 'on' : 'off', temp: room.temp, reason: room.mode === 'auto' ? tg.profile : room.mode });
       room.heating = heating;
       room.temp += (heating ? 0.04 : -0.012) + (Math.random() - 0.5) * 0.01;
@@ -462,7 +467,8 @@ const mock = (() => {
     const tg = target(room, sched, presence, Date.now());
     return { id: room.id, temp: room.temp, setpoint: tg.sp, mode: room.mode, heating: room.heating, updated: room.updated,
       profile: tg.profile, source: tg.source, until: tg.until, manual: tg.manual, manualUntil: room.manualUntil,
-      window: room.windowUntil > Date.now() ? room.windowUntil : null };
+      window: room.windowUntil > Date.now() ? room.windowUntil : null,
+      boost: room.boostUntil > Date.now() ? room.boostUntil : null };
   };
   const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until }; };
   return {
@@ -474,6 +480,8 @@ const mock = (() => {
         if (p.mode === 'auto') room.manualSp = room.manualUntil = null;
         evts.push({ t, room: id, type: 'mode', temp: room.temp, reason: p.mode });
       }
+      if (p.boost === true) { room.boostUntil = t + 30 * 60e3; evts.push({ t, room: id, type: 'boost', temp: room.temp, reason: '30 min' }); }
+      else if (p.boost === false && room.boostUntil) { room.boostUntil = null; evts.push({ t, room: id, type: 'boost_end', temp: room.temp, reason: 'manuel' }); }
       if (p.window === false && room.windowUntil > 0) {
         room.windowUntil = -(t + 16 * 60e3);
         evts.push({ t, room: id, type: 'window_end', temp: room.temp, reason: 'manuel' });
@@ -580,6 +588,7 @@ function renderDial() {
     eco: 'Eco forcé',
     horsgel: 'Chauffage coupé',
   }[s.mode];
+  if (s.boost && !s.window) { st.className = 'status on'; st.textContent = `Boost : chauffe à fond jusqu’à ${hhmm(s.boost)}`; }
   if (s.window) { st.className = 'status win'; st.textContent = `Fenêtre ouverte, chauffage coupé jusqu’à ${hhmm(s.window)}`; }
 
   const pl = $('#profline');
@@ -589,6 +598,10 @@ function renderDial() {
   else pl.textContent = `${profName(s.profile)} ${untilText(s.until, s.source)}`.trim();
 
   $('#minus').disabled = $('#plus').disabled = s.mode !== 'auto';
+  const bb = $('#boost');
+  bb.textContent = s.boost ? 'Arrêter le boost' : 'Boost 30 min';
+  bb.classList.toggle('on', !!s.boost);
+  bb.disabled = !!s.window;
   $('#dial').style.opacity = s.mode === 'auto' ? 1 : .55;
 }
 $('#profline').addEventListener('click', async e => {
@@ -604,6 +617,11 @@ function nudge(d) {
   pendingSp = clamp((pendingSp ?? s.setpoint ?? 19) + d, SP_MIN, SP_MAX); renderDial();
   clearTimeout(spTimer); spTimer = setTimeout(() => commitSetpoint(pendingSp), 700);
 }
+$('#boost').onclick = async () => {
+  const s = rooms[current]; if (!s) return;
+  try { rooms[current] = await api.set(current, { boost: !s.boost }); } catch (err) { showConn(err); }
+  renderAll();
+};
 $('#minus').onclick = () => nudge(-1);
 $('#plus').onclick = () => nudge(1);
 async function commitSetpoint(v) {
@@ -779,6 +797,7 @@ async function renderInfos() {
     mode: `Mode ${MODES.find(m => m.id === e.reason)?.label ?? e.reason}`,
     setpoint: 'Consigne modifiée',
     window: 'Fenêtre ouverte détectée', window_end: 'Fenêtre fermée',
+    boost: 'Boost 30 min', boost_end: 'Boost arrêté',
   }[e.type]);
   const list = evts.filter(e => e.room === current);
   $('#log').innerHTML = list.length
