@@ -39,7 +39,7 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
 .dot.on{background:var(--heat)}
 
-section[hidden]{display:none}
+[hidden]{display:none !important}
 .dial{position:relative;width:min(300px,82vw);margin:22px auto 4px;touch-action:none;user-select:none}
 .dial svg{display:block;width:100%;height:auto}
 .dial .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
@@ -87,7 +87,28 @@ input[type=text],input[type=number],input[type=password],input[type=url]{backgro
 .msg{font-size:.9rem;min-height:1.3em;margin:0}
 
 nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);
-  padding:6px 0 calc(6px + env(safe-area-inset-bottom,0));display:grid;grid-template-columns:repeat(3,1fr)}
+  padding:6px 0 calc(6px + env(safe-area-inset-bottom,0));display:grid;grid-template-columns:repeat(4,1fr)}
+.profline{text-align:center;color:var(--muted);font-size:.9rem;margin:4px 0 0}
+.linkbtn{border:0;background:none;color:var(--cool);font-weight:600;padding:0 0 0 6px;font-size:.9rem}
+.card{background:var(--surface);border-radius:16px;padding:18px;margin-top:18px}
+.card .big{display:block;font-size:2.2rem;font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:2px 0 4px}
+.muted{color:var(--muted)}
+.quick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.quick button{border:1px solid var(--line);background:none;border-radius:12px;padding:13px 6px;font-weight:600}
+.quick button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.vac{display:flex;gap:8px;align-items:end;margin-top:10px}
+.vac label{flex:1}
+.vac input{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink)}
+.block{background:var(--surface);border-radius:14px;padding:4px 14px 10px;margin-bottom:8px}
+.block h3{font-size:1rem;font-weight:600;margin:12px 0 4px}
+.prow{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.step{display:flex;align-items:center;gap:6px}
+.step button{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--bg);font-size:1.1rem;font-weight:600}
+.step b{min-width:76px;text-align:center;font-weight:600;font-variant-numeric:tabular-nums}
+.slot{display:grid;grid-template-columns:104px 1fr 36px;gap:8px;margin:6px 0}
+.slot input,.slot select{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px;color:var(--ink);min-width:0}
+.slot .x{border:0;background:none;font-size:1.3rem;color:var(--muted)}
+.add{width:100%;border:1px dashed var(--line);background:none;border-radius:10px;padding:9px;color:var(--muted);font-weight:600;margin-top:4px}
 nav button{border:0;background:none;padding:10px 0;font-weight:600;color:var(--muted);font-size:.95rem}
 nav button[aria-current="page"]{color:var(--ink)}
 @media (prefers-reduced-motion: no-preference){ .arc{transition:stroke .4s} }
@@ -116,8 +137,37 @@ nav button[aria-current="page"]{color:var(--ink)}
       <button id="plus" aria-label="Monter la consigne">+</button>
     </div>
     <p class="status" id="status"></p>
+    <p class="profline" id="profline"></p>
     <div class="modes" id="modes" role="group" aria-label="Mode"></div>
     <p class="hint" id="modeHint"></p>
+  </section>
+
+  <!-- PRÉSENCE -->
+  <section id="tab-presence" hidden>
+    <div class="card">
+      <span class="muted">En ce moment</span>
+      <span class="big" id="pName">–</span>
+      <span class="muted" id="pWhy"></span>
+    </div>
+    <div class="quick" id="quick">
+      <button data-act="home">Je suis là</button>
+      <button data-act="away">Je pars</button>
+      <button data-act="vacation">Vacances</button>
+      <button data-act="planning">Suivre le planning</button>
+    </div>
+    <div class="vac" id="vacBox" hidden>
+      <label class="muted">Retour le<input type="date" id="vacDate"></label>
+      <button class="btn" id="vacOk" style="flex:0 0 auto">Partir</button>
+    </div>
+    <h2>Températures par profil</h2>
+    <div id="profiles"></div>
+    <h2>Planning</h2>
+    <div id="planning"></div>
+    <form id="schedForm" style="margin-top:14px">
+      <label>Écart avant relance (°C)<input type="number" id="hyst" min="0.5" max="3" step="0.5"></label>
+      <button type="submit" class="btn">Enregistrer le planning</button>
+      <p class="msg" id="schedMsg"></p>
+    </form>
   </section>
 
   <!-- INFOS -->
@@ -146,10 +196,7 @@ nav button[aria-current="page"]{color:var(--ink)}
         <label>Puissance chambre (W)<input type="number" name="p_chambre" min="0" step="50"></label>
         <label>Puissance salon (W)<input type="number" name="p_salon" min="0" step="50"></label>
       </div>
-      <div class="row2">
-        <label>Prix du kWh (€)<input type="number" name="price" min="0" step="0.0001"></label>
-        <label>Écart avant relance (°C)<input type="number" name="hyst" min="0.1" max="2" step="0.1"></label>
-      </div>
+      <label>Prix du kWh (€)<input type="number" name="price" min="0" step="0.0001"></label>
       <h2 style="margin:12px 0 0">Connexion</h2>
       <label>Adresse du Worker<input type="url" name="workerUrl" placeholder="https://chauffage.nathanbbd.workers.dev"></label>
       <label>Code d’accès<input type="password" name="token" autocomplete="off"></label>
@@ -165,332 +212,11 @@ nav button[aria-current="page"]{color:var(--ink)}
 
 <nav>
   <button data-tab="thermo" aria-current="page">Thermostat</button>
+  <button data-tab="presence">Présence</button>
   <button data-tab="infos">Infos</button>
   <button data-tab="reglages">Réglages</button>
 </nav>
 
-<script>
-/* =========================================================
-   CONFIG
-   ========================================================= */
-const ROOMS = [{ id: 'chambre', name: 'Chambre' }, { id: 'salon', name: 'Salon' }];
-const MODES = [
-  { id: 'auto',     label: 'Auto',     hint: 'L’app regarde le thermomètre et passe le radiateur en Confort ou en Hors-gel pour tenir la consigne.' },
-  { id: 'confort',  label: 'Confort',  hint: 'Le radiateur suit son propre bouton (7/8). L’app ne régule plus.' },
-  { id: 'eco',      label: 'Eco',      hint: 'Consigne du bouton moins 3 à 4 °C. Pratique pour la nuit.' },
-  { id: 'horsgel',  label: 'Hors-gel', hint: 'Chauffage coupé, le radiateur ne protège que du gel.' },
-];
-const DIAL_MIN = 14, DIAL_MAX = 26, SP_MIN = 15, SP_MAX = 25;
-const DEFAULTS = { demo: true, workerUrl: '', token: '', price: 0.20, hyst: 0.5, power: { chambre: 1000, salon: 1500 } };
-
-const store = {
-  load() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('chauffage') || '{}') }; } catch { return { ...DEFAULTS }; } },
-  save(c) { try { localStorage.setItem('chauffage', JSON.stringify(c)); } catch {} },
-};
-let cfg = store.load();
-
-/* =========================================================
-   API — contrat attendu du Worker
-   GET  /rooms            → [{ id, temp, setpoint, mode, heating, updated }]
-   POST /rooms/:id        ← { setpoint?, mode? }  → room
-   GET  /history?hours=24 → { chambre:[{ t, temp, sp, heating }], salon:[…] }  (pas de 5 min)
-   GET  /events?limit=40  → [{ t, room, type:'on'|'off'|'mode'|'setpoint', temp, reason }]
-   ========================================================= */
-async function req(path, opts = {}) {
-  const r = await fetch(cfg.workerUrl.replace(/\/$/, '') + path, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.token, ...(opts.headers || {}) },
-  });
-  if (!r.ok) throw new Error('Le Worker a répondu ' + r.status);
-  return r.json();
-}
-const api = {
-  rooms:   ()          => cfg.demo ? mock.rooms()         : req('/rooms'),
-  set:     (id, patch) => cfg.demo ? mock.set(id, patch)  : req('/rooms/' + id, { method: 'POST', body: JSON.stringify(patch) }),
-  history: ()          => cfg.demo ? mock.history()       : req('/history?hours=24'),
-  events:  ()          => cfg.demo ? mock.events()        : req('/events?limit=40'),
-};
-
-/* =========================================================
-   MOCK — simule 24 h d'historique puis la régulation en direct
-   (le vrai Worker fera la même logique dans son Cron)
-   ========================================================= */
-const mock = (() => {
-  const STEP = 5 * 60e3, state = {}, hist = {}, evts = [];
-  const schedule = h => ((h >= 7 && h < 9) || (h >= 18 && h < 23)) ? 20.5 : 18.5;
-  const regulate = (s, sp) => {
-    const half = cfg.hyst / 2;
-    if (s.mode === 'auto') { if (s.temp < sp - half) return true; if (s.temp > sp + half) return false; return s.heating; }
-    if (s.mode === 'confort') return s.temp < 24.5;
-    if (s.mode === 'eco') return s.temp < 21;
-    return false;
-  };
-  const now = Date.now();
-  ROOMS.forEach((r, i) => {
-    const s = { id: r.id, temp: 18.4 + i * 0.5, setpoint: 20.5, mode: 'auto', heating: false, updated: now };
-    hist[r.id] = [];
-    for (let k = 287; k >= 0; k--) {
-      const t = now - k * STEP, sp = schedule(new Date(t).getHours());
-      const was = s.heating;
-      s.heating = regulate(s, sp);
-      if (was !== s.heating) evts.push({ t, room: r.id, type: s.heating ? 'on' : 'off', temp: s.temp, reason: 'auto' });
-      s.temp += (s.heating ? 0.11 : -0.035) + (Math.random() - 0.5) * 0.02;
-      hist[r.id].push({ t, temp: +s.temp.toFixed(2), sp, heating: s.heating });
-    }
-    s.setpoint = schedule(new Date(now).getHours());
-    state[r.id] = s;
-  });
-  setInterval(() => {
-    ROOMS.forEach(r => {
-      const s = state[r.id], was = s.heating;
-      s.heating = regulate(s, s.setpoint);
-      if (was !== s.heating) evts.push({ t: Date.now(), room: r.id, type: s.heating ? 'on' : 'off', temp: s.temp, reason: s.mode });
-      s.temp += (s.heating ? 0.04 : -0.015) + (Math.random() - 0.5) * 0.01;
-      s.updated = Date.now();
-    });
-  }, 3000);
-  const clone = x => JSON.parse(JSON.stringify(x));
-  return {
-    rooms: async () => clone(ROOMS.map(r => state[r.id])),
-    set: async (id, p) => {
-      const s = state[id];
-      if (p.mode && p.mode !== s.mode) evts.push({ t: Date.now(), room: id, type: 'mode', temp: s.temp, reason: p.mode });
-      if (p.setpoint != null && p.setpoint !== s.setpoint) evts.push({ t: Date.now(), room: id, type: 'setpoint', temp: p.setpoint, reason: 'manuel' });
-      Object.assign(s, p);
-      return clone(s);
-    },
-    history: async () => clone(hist),
-    events: async () => clone(evts.slice(-40).reverse()),
-  };
-})();
-
-/* =========================================================
-   UTILS
-   ========================================================= */
-const $ = s => document.querySelector(s);
-const fmt = (n, d = 1) => n.toFixed(d).replace('.', ',');
-const hhmm = t => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const roomName = id => ROOMS.find(r => r.id === id)?.name ?? id;
-
-/* =========================================================
-   STATE + UI
-   ========================================================= */
-let rooms = {}, current = 'chambre', tab = 'thermo', dragging = false, pendingSp = null;
-
-function renderRooms() {
-  $('#rooms').innerHTML = ROOMS.map(r => {
-    const on = rooms[r.id]?.heating;
-    return `<button data-room="${r.id}" aria-pressed="${r.id === current}"><span class="dot ${on ? 'on' : ''}"></span>${r.name}</button>`;
-  }).join('');
-}
-$('#rooms').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  current = b.dataset.room; renderAll();
-});
-
-/* --- Cadran --- */
-const C = 140, R = 116;
-const angleOf = v => 135 + (clamp(v, DIAL_MIN, DIAL_MAX) - DIAL_MIN) / (DIAL_MAX - DIAL_MIN) * 270;
-const pt = a => [C + R * Math.cos(a * Math.PI / 180), C + R * Math.sin(a * Math.PI / 180)];
-function arc(a1, a2) {
-  if (a2 - a1 < 0.5) a2 = a1 + 0.5;
-  const [x1, y1] = pt(a1), [x2, y2] = pt(a2);
-  return `M${x1} ${y1} A${R} ${R} 0 ${a2 - a1 > 180 ? 1 : 0} 1 ${x2} ${y2}`;
-}
-function renderDial() {
-  const s = rooms[current]; if (!s) return;
-  const sp = pendingSp ?? s.setpoint;
-  const color = s.heating ? 'var(--heat)' : (s.mode === 'horsgel' ? 'var(--cool)' : 'var(--idle)');
-  const ticks = [];
-  for (let v = DIAL_MIN; v <= DIAL_MAX; v++) {
-    const a = angleOf(v) * Math.PI / 180, r1 = R + 14, r2 = v % 2 ? R + 17 : R + 20;
-    ticks.push(`<line x1="${C + r1 * Math.cos(a)}" y1="${C + r1 * Math.sin(a)}" x2="${C + r2 * Math.cos(a)}" y2="${C + r2 * Math.sin(a)}" stroke="var(--line)" stroke-width="2" stroke-linecap="round"/>`);
-  }
-  const [kx, ky] = pt(angleOf(sp));
-  $('#dialSvg').innerHTML = `
-    ${ticks.join('')}
-    <path d="${arc(135, 405)}" fill="none" stroke="var(--line)" stroke-width="14" stroke-linecap="round"/>
-    <path class="arc" d="${arc(135, angleOf(s.temp))}" fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round"/>
-    <circle class="knob" cx="${kx}" cy="${ky}" r="15" fill="var(--surface)" stroke="var(--ink)" stroke-width="3"/>
-    <text x="${pt(135)[0] - 2}" y="${pt(135)[1] + 30}" font-size="12" fill="var(--muted)" text-anchor="middle">${DIAL_MIN}°</text>
-    <text x="${pt(405)[0] + 2}" y="${pt(405)[1] + 30}" font-size="12" fill="var(--muted)" text-anchor="middle">${DIAL_MAX}°</text>`;
-  $('#now').innerHTML = `${fmt(s.temp)}<sup>°</sup>`;
-  $('#sp').textContent = `${fmt(sp)} °C`;
-  const st = $('#status');
-  st.className = 'status' + (s.heating ? ' on' : '');
-  st.textContent = {
-    auto: s.heating ? `Chauffe pour atteindre ${fmt(sp)} °C` : `Consigne tenue, radiateur au repos`,
-    confort: 'Confort forcé, le bouton du radiateur décide',
-    eco: 'Eco forcé',
-    horsgel: 'Chauffage coupé',
-  }[s.mode];
-  $('#minus').disabled = $('#plus').disabled = s.mode !== 'auto';
-  $('#dial').style.opacity = s.mode === 'auto' ? 1 : .55;
-}
-
-function setpointFromPointer(e) {
-  const box = $('#dialSvg').getBoundingClientRect();
-  const x = (e.clientX - box.left) / box.width * 280, y = (e.clientY - box.top) / box.height * 280;
-  let rel = ((Math.atan2(y - C, x - C) * 180 / Math.PI) - 135 + 720) % 360;
-  if (rel > 270) rel = rel > 315 ? 0 : 270;
-  const v = DIAL_MIN + rel / 270 * (DIAL_MAX - DIAL_MIN);
-  return clamp(Math.round(v * 2) / 2, SP_MIN, SP_MAX);
-}
-const dialEl = $('#dial');
-dialEl.addEventListener('pointerdown', e => {
-  if (rooms[current]?.mode !== 'auto') return;
-  dragging = true; dialEl.setPointerCapture(e.pointerId);
-  pendingSp = setpointFromPointer(e); renderDial();
-});
-dialEl.addEventListener('pointermove', e => { if (!dragging) return; pendingSp = setpointFromPointer(e); renderDial(); });
-dialEl.addEventListener('pointerup', () => { if (!dragging) return; dragging = false; commitSetpoint(pendingSp); });
-
-let spTimer;
-function nudge(d) {
-  const s = rooms[current]; if (!s || s.mode !== 'auto') return;
-  pendingSp = clamp((pendingSp ?? s.setpoint) + d, SP_MIN, SP_MAX); renderDial();
-  clearTimeout(spTimer); spTimer = setTimeout(() => commitSetpoint(pendingSp), 700);
-}
-$('#minus').onclick = () => nudge(-0.5);
-$('#plus').onclick = () => nudge(0.5);
-async function commitSetpoint(v) {
-  try { rooms[current] = await api.set(current, { setpoint: v }); } catch (err) { showConn(err); }
-  pendingSp = null; renderAll();
-}
-
-/* --- Modes --- */
-function renderModes() {
-  const s = rooms[current]; if (!s) return;
-  $('#modes').innerHTML = MODES.map(m => `<button data-mode="${m.id}" aria-pressed="${s.mode === m.id}">${m.label}</button>`).join('');
-  $('#modeHint').textContent = MODES.find(m => m.id === s.mode).hint;
-}
-$('#modes').addEventListener('click', async e => {
-  const b = e.target.closest('button'); if (!b) return;
-  try { rooms[current] = await api.set(current, { mode: b.dataset.mode }); } catch (err) { showConn(err); }
-  renderAll();
-});
-
-/* --- Infos --- */
-async function renderInfos() {
-  let hist, evts;
-  try { [hist, evts] = await Promise.all([api.history(), api.events()]); } catch (err) { showConn(err); return; }
-  const cost = id => {
-    const pts = hist[id] || [];
-    const hours = pts.filter(p => p.heating).length * 5 / 60;
-    const kwh = hours * (cfg.power[id] || 0) / 1000;
-    return { hours, kwh, eur: kwh * cfg.price };
-  };
-  const c = cost(current);
-  $('#stTime').textContent = `${Math.floor(c.hours)} h ${String(Math.round(c.hours % 1 * 60)).padStart(2, '0')}`;
-  $('#stKwh').textContent = `${fmt(c.kwh)} kWh`;
-  $('#stCost').textContent = `${fmt(c.eur, 2)} €`;
-  const all = ROOMS.reduce((s, r) => s + cost(r.id).eur, 0);
-  $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € sur 24 h, soit environ ${Math.round(all * 30)} € par mois à ce rythme.`;
-
-  // Courbe
-  const pts = hist[current] || [];
-  const W = 600, H = 220, L = 34, B = 24, T = 10;
-  if (!pts.length) { $('#chart').innerHTML = ''; return; }
-  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
-  const vals = pts.flatMap(p => [p.temp, p.sp]);
-  const lo = Math.floor(Math.min(...vals) - .5), hi = Math.ceil(Math.max(...vals) + .5);
-  const X = t => L + (t - t0) / (t1 - t0 || 1) * (W - L - 6);
-  const Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
-  let svg = '';
-  // périodes de chauffe
-  let start = null;
-  pts.forEach((p, i) => {
-    if (p.heating && start === null) start = p.t;
-    if ((!p.heating || i === pts.length - 1) && start !== null) {
-      svg += `<rect x="${X(start)}" y="${T}" width="${Math.max(1, X(p.t) - X(start))}" height="${H - T - B}" fill="var(--heat-soft)"/>`;
-      start = null;
-    }
-  });
-  for (let v = lo; v <= hi; v++) {
-    svg += `<line x1="${L}" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1"/>`;
-    svg += `<text x="${L - 6}" y="${Y(v) + 4}" font-size="11" fill="var(--muted)" text-anchor="end">${v}°</text>`;
-  }
-  for (let t = Math.ceil(t0 / 216e5) * 216e5; t <= t1; t += 216e5) {
-    svg += `<text x="${X(t)}" y="${H - 6}" font-size="11" fill="var(--muted)" text-anchor="middle">${hhmm(t).slice(0, 2)} h</text>`;
-  }
-  svg += `<polyline fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4" points="${pts.map(p => `${X(p.t)},${Y(p.sp)}`).join(' ')}"/>`;
-  svg += `<polyline fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linejoin="round" points="${pts.map(p => `${X(p.t)},${Y(p.temp)}`).join(' ')}"/>`;
-  $('#chart').innerHTML = svg;
-
-  // Journal
-  const label = e => ({
-    on: 'Chauffe lancée', off: 'Chauffe coupée',
-    mode: `Mode ${MODES.find(m => m.id === e.reason)?.label ?? e.reason}`,
-    setpoint: 'Consigne modifiée',
-  }[e.type]);
-  const list = evts.filter(e => e.room === current);
-  $('#log').innerHTML = list.length
-    ? list.map(e => `<li><time>${hhmm(e.t)}</time><span>${label(e)}</span><span class="t">${fmt(e.temp)} °C</span></li>`).join('')
-    : `<li class="empty">Aucun déclenchement pour ${roomName(current)} sur la période.</li>`;
-}
-
-/* --- Réglages --- */
-function fillForm() {
-  const f = $('#form');
-  f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon;
-  f.price.value = cfg.price; f.hyst.value = cfg.hyst;
-  f.workerUrl.value = cfg.workerUrl; f.token.value = cfg.token; f.demo.checked = cfg.demo;
-}
-function readForm() {
-  const f = $('#form');
-  return {
-    power: { chambre: +f.p_chambre.value || 0, salon: +f.p_salon.value || 0 },
-    price: +f.price.value || 0, hyst: +f.hyst.value || 0.5,
-    workerUrl: f.workerUrl.value.trim(), token: f.token.value, demo: f.demo.checked,
-  };
-}
-$('#form').addEventListener('submit', e => {
-  e.preventDefault();
-  cfg = readForm(); store.save(cfg);
-  $('#msg').textContent = 'Réglages enregistrés.'; refresh();
-});
-$('#test').onclick = async () => {
-  const prev = cfg; cfg = { ...readForm(), demo: false };
-  $('#msg').textContent = 'Connexion au Worker…';
-  try { const r = await api.rooms(); $('#msg').textContent = `Connecté, ${r.length} pièce(s) trouvée(s).`; }
-  catch (err) { $('#msg').textContent = cfg.workerUrl ? `Échec : ${err.message}. Vérifie l’adresse et le code d’accès.` : 'Renseigne l’adresse du Worker.'; }
-  cfg = prev;
-};
-
-/* --- Navigation --- */
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-  tab = b.dataset.tab;
-  document.querySelectorAll('nav button').forEach(x => x.toggleAttribute('aria-current', x === b));
-  b.setAttribute('aria-current', 'page');
-  ['thermo', 'infos', 'reglages'].forEach(t => $('#tab-' + t).hidden = t !== tab);
-  $('#rooms').hidden = tab === 'reglages';
-  if (tab === 'infos') renderInfos();
-  if (tab === 'reglages') fillForm();
-});
-
-/* --- Connexion --- */
-function showConn(err) {
-  const p = $('#conn');
-  if (cfg.demo) { p.textContent = 'Mode démo'; p.className = 'pill'; return; }
-  if (err) { p.textContent = 'Worker injoignable'; p.className = 'pill warn'; return; }
-  const last = Math.max(...Object.values(rooms).map(r => r.updated || 0));
-  const min = Math.round((Date.now() - last) / 60e3);
-  p.textContent = min < 1 ? 'À jour' : `Relevé il y a ${min} min`;
-  p.className = 'pill' + (min > 15 ? ' warn' : '');
-}
-
-function renderAll() { renderRooms(); renderDial(); renderModes(); if (tab === 'infos') renderInfos(); }
-async function refresh() {
-  try {
-    const list = await api.rooms();
-    rooms = Object.fromEntries(list.map(r => [r.id, r]));
-    showConn();
-  } catch (err) { showConn(err); }
-  if (!dragging && pendingSp === null) renderAll();
-}
-refresh();
-setInterval(refresh, cfg.demo ? 3000 : 30000);
-</script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
