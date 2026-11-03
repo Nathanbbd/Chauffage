@@ -57,6 +57,9 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .adjust .boost{width:auto;height:44px;padding:0 16px;border-radius:22px;border:1.5px solid var(--heat);background:none;color:var(--heat);font-size:.95rem;font-weight:600;min-width:132px}
 .adjust .boost.on{background:var(--heat);color:#fff}
 .adjust .boost:disabled{opacity:.4}
+.winbar{display:flex;gap:6px;margin-top:12px;min-height:42px}
+.winbar button{flex:1;height:42px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--cool);font-weight:600;font-size:.92rem}
+.winbar .x{flex:0 0 42px;color:var(--muted);font-size:1.2rem}
 .adjust button{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.5rem;font-weight:600}
 .status{text-align:center;margin:18px 0 0;min-height:1.5em}
 .status.on{color:var(--heat)}
@@ -161,7 +164,7 @@ body.fit .modes{margin-top:14px}
     <p class="status" id="status"></p>
     <p class="profline" id="profline"></p>
     <div class="modes" id="modes" role="group" aria-label="Mode"></div>
-    <p class="hint" id="modeHint"></p>
+    <div class="winbar" id="winbar"></div>
   </section>
 
   <!-- PRÉSENCE -->
@@ -482,6 +485,7 @@ const mock = (() => {
       }
       if (p.boost === true) { room.boostUntil = t + 30 * 60e3; evts.push({ t, room: id, type: 'boost', temp: room.temp, reason: '30 min' }); }
       else if (p.boost === false && room.boostUntil) { room.boostUntil = null; evts.push({ t, room: id, type: 'boost_end', temp: room.temp, reason: 'manuel' }); }
+      if (typeof p.window === 'number') { room.windowUntil = t + p.window * 60e3; evts.push({ t, room: id, type: 'window', temp: room.temp, reason: `manuel, ${p.window} min` }); }
       if (p.window === false && room.windowUntil > 0) {
         room.windowUntil = -(t + 16 * 60e3);
         evts.push({ t, room: id, type: 'window_end', temp: room.temp, reason: 'manuel' });
@@ -632,8 +636,26 @@ async function commitSetpoint(v) {
 function renderModes() {
   const s = rooms[current]; if (!s) return;
   $('#modes').innerHTML = MODES.map(m => `<button data-mode="${m.id}" aria-pressed="${s.mode === m.id}">${m.label}</button>`).join('');
-  $('#modeHint').textContent = MODES.find(m => m.id === s.mode).hint;
 }
+/* Fenêtre ouverte à la main : on choisit la durée, le radiateur est coupé pendant ce temps */
+const WIN_CHOICES = [[15, '15 min'], [30, '30 min'], [60, '1 h'], [120, '2 h']];
+let winPicking = false;
+function renderWinbar() {
+  const s = rooms[current], el = $('#winbar');
+  if (!s || s.window || s.mode === 'horsgel') { el.innerHTML = ''; winPicking = false; return; }
+  el.innerHTML = winPicking
+    ? WIN_CHOICES.map(([m, l]) => `<button data-win="${m}">${l}</button>`).join('') + `<button class="x" data-win="cancel" aria-label="Annuler">×</button>`
+    : `<button data-win="pick">J’ouvre une fenêtre</button>`;
+}
+$('#winbar').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-win]'); if (!b) return;
+  const v = b.dataset.win;
+  if (v === 'pick' || v === 'cancel') { winPicking = v === 'pick'; return renderWinbar(); }
+  winPicking = false;
+  try { rooms[current] = await api.set(current, { window: Number(v) }); } catch (err) { showConn(err); }
+  renderAll();
+});
+
 $('#modes').addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b) return;
   try { rooms[current] = await api.set(current, { mode: b.dataset.mode }); } catch (err) { showConn(err); }
@@ -907,7 +929,7 @@ function showConn(err) {
   p.className = 'pill' + (min > 15 ? ' warn' : '');
 }
 
-function renderAll() { renderRooms(); renderDial(); renderModes(); if (tab === 'infos') renderInfos(); }
+function renderAll() { renderRooms(); renderDial(); renderModes(); renderWinbar(); if (tab === 'infos') renderInfos(); }
 /* Alerte : chauffage plus piloté, Worker injoignable, essai Tuya bientôt fini */
 let lastHealth = null;
 const ago = t => { const m = Math.round((Date.now() - t) / 60e3); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`; };
