@@ -259,6 +259,11 @@ body.fit .modes{margin-top:14px}
       <h2 style="margin:12px 0 0">Présence automatique</h2>
       <label class="check"><input type="checkbox" name="autoPres">Savoir qui est là grâce au Wi-Fi de vos téléphones</label>
       <p class="hint" style="margin-top:-4px">Personne au Wi-Fi depuis 15 min : profil Absent. Quelqu’un rentre : À la maison, même si le planning dit Absent. Nécessite les Raccourcis iPhone sur vos deux téléphones (voir le README). Commun à vos deux téléphones.</p>
+      <h2 style="margin:12px 0 0">Notifications</h2>
+      <label class="check"><input type="checkbox" name="notifOn">Recevoir les alertes sur l’iPhone (app ntfy)</label>
+      <label>Nom du sujet ntfy<input type="text" name="ntfyTopic" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <p class="hint" style="margin-top:-4px">Installe l’app gratuite ntfy, touche +, et abonne-toi à ce nom (le même sur vos deux téléphones). Garde-le pour vous : qui le connaît peut lire les alertes. Vous serez prévenus d’une panne de plus de 15 min, de la fin de l’essai Tuya et d’une fenêtre ouverte détectée.</p>
+      <button type="button" class="btn alt" id="notifTest">Envoyer une notification de test</button>
       <h2 style="margin:12px 0 0">Connexion</h2>
       <label>Adresse du Worker<input type="url" name="workerUrl" placeholder="https://tuya-appart.boisbourdinnathande.workers.dev"></label>
       <label>Code d’accès<input type="password" name="token" autocomplete="off"></label>
@@ -443,6 +448,7 @@ const api = {
   saveSchedule:   s             => cfg.demo ? mock.saveSchedule(s)         : post('/schedule', s, 'PUT'),
   presence:       ()            => cfg.demo ? mock.presence()              : req('/presence'),
   presenceAction: (action, until) => cfg.demo ? mock.presenceAction(action, until) : post('/presence', { action, until }),
+  notifyTest:     topic         => cfg.demo ? Promise.reject(new Error('indisponible en mode démo')) : post('/notify/test', { topic }),
   setPerson:      (person, action) => cfg.demo ? mock.setPerson(person, action) : post('/presence', { person, action, force: true }),
   resetHistory:   ()            => cfg.demo ? mock.resetHistory()          : post('/history/reset', {}),
   health:         ()            => cfg.demo ? Promise.resolve({ ok: Date.now() }) : req('/health'),
@@ -889,6 +895,8 @@ async function fillForm() {
   f.winMin.value = String(regSched?.windowMinutes ?? 30);
   f.tuyaExp.value = regSched?.tuyaExpiry || '';
   f.autoPres.checked = !!regSched?.autoPresence;
+  f.notifOn.checked = !!regSched?.notify;
+  f.ntfyTopic.value = regSched?.ntfyTopic || f.ntfyTopic.value || `chauffage-${Math.random().toString(36).slice(2, 8)}${Math.random().toString(36).slice(2, 8)}`;
   updateBandHint();
   f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon;
   f.priceHP.value = cfg.priceHP; f.priceHC.value = cfg.priceHC; f.hc.value = cfg.hc;
@@ -908,12 +916,14 @@ $('#form').addEventListener('submit', async e => {
     hyst: Math.max(1, Math.round(+f.hyst.value || 1)), centered: f.band.value === 'centre',
     windowDetect: f.winOn.checked, windowDrop: +f.winDrop.value, windowMinutes: +f.winMin.value,
     tuyaExpiry: f.tuyaExp.value || null, autoPresence: f.autoPres.checked,
+    notify: f.notifOn.checked, ntfyTopic: f.ntfyTopic.value.trim() || null,
   };
   cfg = readForm(); store.save(cfg);
   $('#msg').textContent = 'Réglages enregistrés.';
   const changed = regSched && (regSched.hyst !== reg.hyst || !!regSched.centered !== reg.centered
     || (regSched.windowDetect ?? true) !== reg.windowDetect || (regSched.windowDrop ?? 2) !== reg.windowDrop
-    || (regSched.windowMinutes ?? 30) !== reg.windowMinutes || (regSched.tuyaExpiry ?? null) !== reg.tuyaExpiry || !!regSched.autoPresence !== reg.autoPresence);
+    || (regSched.windowMinutes ?? 30) !== reg.windowMinutes || (regSched.tuyaExpiry ?? null) !== reg.tuyaExpiry || !!regSched.autoPresence !== reg.autoPresence
+    || !!regSched.notify !== reg.notify || (regSched.ntfyTopic ?? null) !== reg.ntfyTopic);
   if (wasDemo === cfg.demo && changed) {
     try { regSched = await api.saveSchedule({ ...regSched, ...reg }); }
     catch (err) { $('#msg').textContent = `Enregistré sur ce téléphone, mais la régulation n’a pas pu être envoyée : ${err.message}`; }
@@ -921,6 +931,13 @@ $('#form').addEventListener('submit', async e => {
   if (wasDemo !== cfg.demo) location.reload(); else refresh();
 });
 /* Export : un fichier JSON avec les relevés, le journal et les réglages utiles, à partager */
+$('#notifTest').onclick = async () => {
+  const topic = $('#form').ntfyTopic.value.trim();
+  if (!/^[A-Za-z0-9_-]{6,64}$/.test(topic)) { $('#msg').textContent = 'Nom de sujet invalide : lettres, chiffres, - et _ uniquement (6 caractères minimum).'; return; }
+  $('#msg').textContent = 'Envoi…';
+  try { const r = await api.notifyTest(topic); $('#msg').textContent = r.ok ? 'Notification envoyée : elle doit arriver sur vos téléphones abonnés.' : 'ntfy n’a pas accepté l’envoi, réessaie dans un instant.'; }
+  catch (err) { $('#msg').textContent = `Échec : ${err.message}`; }
+};
 $('#exportHist').onclick = async () => {
   $('#msg').textContent = 'Préparation de l’export…';
   try {
