@@ -203,6 +203,7 @@ body.fit .modes{margin-top:14px}
       <div class="stat"><strong id="stCost">–</strong><span>estimés</span></div>
     </div>
     <p class="total" id="stTotal"></p>
+    <p class="total" id="stRate"></p>
     <h2>Température</h2>
     <div class="chart">
       <svg viewBox="0 0 600 220" id="chart" role="img" aria-label="Courbe de température sur 24 heures"></svg>
@@ -589,7 +590,7 @@ function renderDial() {
   const st = $('#status');
   st.className = 'status' + (s.heating ? ' on' : '');
   st.textContent = {
-    auto: s.heating ? `Chauffe pour atteindre ${spText(sp)}` : sp == null ? 'Chauffage coupé par le profil' : 'Consigne tenue, radiateur au repos',
+    auto: s.heating ? `Chauffe pour atteindre ${spText(sp)}${etaText(s, sp)}` : sp == null ? 'Chauffage coupé par le profil' : 'Consigne tenue, radiateur au repos',
     confort: 'Confort forcé, le bouton du radiateur décide',
     eco: 'Eco forcé',
     horsgel: 'Chauffage coupé',
@@ -773,6 +774,8 @@ async function renderInfos() {
   $('#stKwh').textContent = `${fmt(c.kwh, 1)} kWh`;
   $('#stCost').textContent = `${fmt(c.eur, 2)} €`;
   const all = ROOMS.reduce((s, r) => s + cost(r.id).eur, 0);
+  const rt = rateOf(current);
+  $('#stRate').textContent = `Vitesse de chauffe : 1 °C toutes les ${rt.min} min environ ${rt.n ? `(mesurée sur ${rt.n} chauffe${rt.n > 1 ? 's' : ''})` : '(valeur de départ, en attendant assez de mesures)'}.`;
   $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € sur 24 h, soit environ ${Math.round(all * 30)} € par mois à ce rythme.`;
 
   const pts = (hist[current] || []).filter(p => p.temp != null);
@@ -975,7 +978,41 @@ function renderAlert(unreachable) {
   document.body.classList.toggle('alerting', !!msg);
 }
 
+/* Estimation « consigne atteinte vers… » : vitesse de chauffe apprise sur les 7 derniers jours */
+const DEFAULT_RATE = { salon: 10, chambre: 13 };   // min par °C, mesurés début novembre 2026
+let rates = {}, ratesAt = 0;
+const rateOf = id => rates[id] || { min: DEFAULT_RATE[id] ?? 12, n: 0 };
+function learnRates(hist, evts) {
+  const out = {};
+  for (const [id, pts] of Object.entries(hist || {})) {
+    const wins = (evts || []).filter(e => e.type === 'window' && e.room === id).map(e => e.t);
+    const per = [];
+    for (let i = 0; i < pts.length; i++) {
+      if (!pts[i].heating || (i > 0 && pts[i - 1].heating)) continue;          // début d'une chauffe
+      let j = i; while (j < pts.length && pts[j].heating) j++;
+      if (j >= pts.length) break;                                                // chauffe en cours : pas encore mesurable
+      const t0 = pts[i].t, t1 = pts[j].t, gain = pts[j].temp - pts[i].temp, min = (t1 - t0) / 60e3;
+      const windowNear = wins.some(w => w > t0 - 2 * 36e5 && w < t1);           // fenêtre ouverte : chauffe faussée
+      if (gain >= 1 && min >= 4 && min <= 180 && !windowNear) per.push(min / gain);
+    }
+    const last = per.slice(-10).sort((a, b) => a - b);
+    if (last.length >= 2) out[id] = { min: Math.round(Math.min(60, Math.max(4, last[Math.floor(last.length / 2)]))), n: last.length };
+  }
+  rates = out;
+}
+function etaText(s, sp) {
+  if (s.mode !== 'auto' || s.boost || s.window || typeof sp !== 'number' || s.temp == null || sp <= s.temp) return '';
+  const t = Date.now() + (sp - s.temp) * rateOf(s.id).min * 60e3;
+  return `, vers ${hhmm(Math.ceil(t / 3e5) * 3e5)}`;                            // arrondi aux 5 min
+}
+async function updateRates() {
+  if (Date.now() - ratesAt < 30 * 60e3) return;
+  ratesAt = Date.now();
+  try { const [h, e] = await Promise.all([api.history(24 * 7), api.allEvents()]); learnRates(h, e); } catch { ratesAt = 0; }
+}
+
 async function refresh() {
+  updateRates();
   let unreachable = false;
   try {
     rooms = Object.fromEntries((await api.rooms()).map(r => [r.id, r]));
