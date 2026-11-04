@@ -108,6 +108,9 @@ nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:
 .card{background:var(--surface);border-radius:16px;padding:18px;margin-top:18px}
 .card .big{display:block;font-size:2.2rem;font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:2px 0 4px}
 .muted{color:var(--muted)}
+.people{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.people span{font-size:.85rem;padding:5px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.people span.home{border-color:var(--ink);color:var(--ink);font-weight:600}
 .quick{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .quick button{border:1px solid var(--line);background:none;border-radius:12px;padding:13px 6px;font-weight:600}
 .quick button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
@@ -173,6 +176,7 @@ body.fit .modes{margin-top:14px}
       <span class="muted">En ce moment</span>
       <span class="big" id="pName">–</span>
       <span class="muted" id="pWhy"></span>
+      <div class="people" id="people"></div>
     </div>
     <div class="quick" id="quick">
       <button data-act="home">Je suis là</button>
@@ -252,6 +256,9 @@ body.fit .modes{margin-top:14px}
         <label>Couper pendant
           <select name="winMin"><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 h</option></select></label>
       </div>
+      <h2 style="margin:12px 0 0">Présence automatique</h2>
+      <label class="check"><input type="checkbox" name="autoPres">Savoir qui est là grâce au Wi-Fi de vos téléphones</label>
+      <p class="hint" style="margin-top:-4px">Personne au Wi-Fi depuis 15 min : profil Absent. Quelqu’un rentre : À la maison, même si le planning dit Absent. Nécessite les Raccourcis iPhone sur vos deux téléphones (voir le README). Commun à vos deux téléphones.</p>
       <h2 style="margin:12px 0 0">Connexion</h2>
       <label>Adresse du Worker<input type="url" name="workerUrl" placeholder="https://tuya-appart.boisbourdinnathande.workers.dev"></label>
       <label>Code d’accès<input type="password" name="token" autocomplete="off"></label>
@@ -295,6 +302,7 @@ const PROFILES = [
 const DEFAULT_SCHEDULE = {
   hyst: 1,
   centered: false, // false : coupe à la consigne ; true : coupe à consigne + écart
+  autoPresence: false, // présence automatique par Wi-Fi (Raccourcis iPhone)
   windowDetect: true, windowDrop: 2, windowMinutes: 30, // fenêtre ouverte : chute de X °C en 15 min → coupe Y min
   profiles: {
     maison:   { chambre: 19, salon: 20 },
@@ -351,11 +359,24 @@ function presenceFor(action, sched, now, until) {
   return null; // 'planning' : on retire le forçage
 }
 
+// Présence par Wi-Fi : chaque téléphone signale « là » / « parti ». Un départ ne compte qu'après
+// 15 min (coupures Wi-Fi), et l'appart passe en Absent seulement quand personne n'est là.
+const PEOPLE = ['nathan', 'jade'];
+const AWAY_DELAY = 15 * 60e3;
+const isHome = (p, now) => !!p && (p.home || now - p.t < AWAY_DELAY);
+function effectivePresence(manual, people, sched, now) {
+  if (manual && (manual.until == null || manual.until > now)) return manual;   // Vacances, Je pars… restent prioritaires
+  if (!sched.autoPresence || !people || !Object.keys(people).length) return null;
+  if (!Object.values(people).some(p => isHome(p, now))) return { profile: 'absent', until: null, source: 'wifi' };
+  if (planAt(sched, now).profile === 'absent') return { profile: 'maison', until: null, source: 'wifi' };
+  return null;                                                                   // quelqu'un est là : planning normal (maison / nuit)
+}
+
 // Ce que la pièce doit viser maintenant.
 function target(room, sched, presence, now) {
   const forced = presence && (presence.until == null || presence.until > now) ? presence : null;
   let profile, until, source;
-  if (forced) { profile = forced.profile; until = forced.until; source = 'manuel'; }
+  if (forced) { profile = forced.profile; until = forced.until; source = forced.source || 'manuel'; }
   else { const pl = planAt(sched, now); profile = pl.profile; until = pl.next?.t ?? null; source = 'planning'; }
   const v = sched.profiles?.[profile]?.[room.id];
   let sp = typeof v === 'number' ? v : null;
@@ -476,7 +497,7 @@ const mock = (() => {
       window: room.windowUntil > Date.now() ? room.windowUntil : null,
       boost: room.boostUntil > Date.now() ? room.boostUntil : null };
   };
-  const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until }; };
+  const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until, autoPresence: !!sched.autoPresence, people: { nathan: null, jade: null } }; };
   return {
     rooms: async () => ROOMS.map(r => view(state[r.id])),
     set: async (id, p) => {
@@ -678,8 +699,16 @@ async function loadPresence(withSchedule) {
 function renderPresence(full) {
   if (!pres) return;
   $('#pName').textContent = profName(pres.profile);
-  $('#pWhy').textContent = (pres.source === 'manuel' ? 'Forcé ' : 'Selon le planning ') + untilText(pres.until, pres.source);
-  const activeAct = pres.source === 'planning' ? 'planning'
+  $('#pWhy').textContent = pres.source === 'wifi'
+    ? (pres.profile === 'absent' ? 'Selon le Wi-Fi : personne n’est à l’appart' : 'Selon le Wi-Fi : quelqu’un est à l’appart')
+    : (pres.source === 'manuel' ? 'Forcé ' : 'Selon le planning ') + untilText(pres.until, pres.source);
+  const names = { nathan: 'Nathan', jade: 'Jade' };
+  $('#people').innerHTML = pres.autoPresence ? Object.entries(pres.people || {}).map(([id, p]) => {
+    const e = id === 'jade' ? 'e' : '';
+    const st = !p ? `pas encore signalé${e}` : p.home ? 'à l’appart' : p.leaving ? `parti${e} à ${hhmm(p.since)}, confirmé dans ${Math.max(1, Math.ceil((p.since + 15 * 60e3 - Date.now()) / 60e3))} min` : `parti${e} depuis ${hhmm(p.since)}`;
+    return `<span class="${p && (p.home || p.leaving) ? 'home' : ''}">${names[id] || id} : ${st}</span>`;
+  }).join('') : '';
+  const activeAct = pres.source === 'wifi' ? '' : pres.source === 'planning' ? 'planning'
     : { maison: 'home', absent: 'away', vacances: 'vacation' }[pres.profile];
   document.querySelectorAll('#quick button').forEach(b => b.setAttribute('aria-pressed', b.dataset.act === activeAct));
   if (full) { renderProfiles(); renderPlanning(); }
@@ -850,6 +879,7 @@ async function fillForm() {
   f.winDrop.value = String(regSched?.windowDrop ?? 2);
   f.winMin.value = String(regSched?.windowMinutes ?? 30);
   f.tuyaExp.value = regSched?.tuyaExpiry || '';
+  f.autoPres.checked = !!regSched?.autoPresence;
   updateBandHint();
   f.p_chambre.value = cfg.power.chambre; f.p_salon.value = cfg.power.salon;
   f.priceHP.value = cfg.priceHP; f.priceHC.value = cfg.priceHC; f.hc.value = cfg.hc;
@@ -868,13 +898,13 @@ $('#form').addEventListener('submit', async e => {
   const reg = {
     hyst: Math.max(1, Math.round(+f.hyst.value || 1)), centered: f.band.value === 'centre',
     windowDetect: f.winOn.checked, windowDrop: +f.winDrop.value, windowMinutes: +f.winMin.value,
-    tuyaExpiry: f.tuyaExp.value || null,
+    tuyaExpiry: f.tuyaExp.value || null, autoPresence: f.autoPres.checked,
   };
   cfg = readForm(); store.save(cfg);
   $('#msg').textContent = 'Réglages enregistrés.';
   const changed = regSched && (regSched.hyst !== reg.hyst || !!regSched.centered !== reg.centered
     || (regSched.windowDetect ?? true) !== reg.windowDetect || (regSched.windowDrop ?? 2) !== reg.windowDrop
-    || (regSched.windowMinutes ?? 30) !== reg.windowMinutes || (regSched.tuyaExpiry ?? null) !== reg.tuyaExpiry);
+    || (regSched.windowMinutes ?? 30) !== reg.windowMinutes || (regSched.tuyaExpiry ?? null) !== reg.tuyaExpiry || !!regSched.autoPresence !== reg.autoPresence);
   if (wasDemo === cfg.demo && changed) {
     try { regSched = await api.saveSchedule({ ...regSched, ...reg }); }
     catch (err) { $('#msg').textContent = `Enregistré sur ce téléphone, mais la régulation n’a pas pu être envoyée : ${err.message}`; }
