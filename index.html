@@ -263,7 +263,8 @@ body.fit .modes{margin-top:14px}
       </div>
       <p class="msg" id="msg"></p>
       <h2 style="margin:12px 0 0">Données</h2>
-      <button type="button" class="btn alt" id="resetHist" style="color:var(--heat);border-color:var(--heat)">Effacer l’historique des mesures</button>
+      <button type="button" class="btn alt" id="exportHist">Exporter les mesures (7 jours)</button>
+      <button type="button" class="btn alt" id="resetHist" style="color:var(--heat);border-color:var(--heat);margin-top:8px">Effacer l’historique des mesures</button>
       <p class="hint" style="margin-top:-4px">Efface les relevés de température, la courbe et le journal des déclenchements, pour vous deux. Le planning, les consignes et les réglages sont conservés.</p>
     </form>
   </section>
@@ -413,7 +414,8 @@ const post = (path, body, method = 'POST') => req(path, { method, body: JSON.str
 const api = {
   rooms:          ()            => cfg.demo ? mock.rooms()                 : req('/rooms'),
   set:            (id, patch)   => cfg.demo ? mock.set(id, patch)          : post('/rooms/' + id, patch),
-  history:        ()            => cfg.demo ? mock.history()               : req('/history?hours=24'),
+  history:        (h = 24)      => cfg.demo ? mock.history()               : req(`/history?hours=${h}`),
+  allEvents:      ()            => cfg.demo ? mock.events()                : req('/events?limit=200'),
   events:         ()            => cfg.demo ? mock.events()                : req('/events?limit=40'),
   schedule:       ()            => cfg.demo ? mock.schedule()              : req('/schedule'),
   saveSchedule:   s             => cfg.demo ? mock.saveSchedule(s)         : post('/schedule', s, 'PUT'),
@@ -876,6 +878,23 @@ $('#form').addEventListener('submit', async e => {
   }
   if (wasDemo !== cfg.demo) location.reload(); else refresh();
 });
+/* Export : un fichier JSON avec les relevés, le journal et les réglages utiles, à partager */
+$('#exportHist').onclick = async () => {
+  $('#msg').textContent = 'Préparation de l’export…';
+  try {
+    const [history, events] = await Promise.all([api.history(24 * 7), api.allEvents()]);
+    const data = { exportedAt: new Date().toISOString(), power: cfg.power, priceHP: cfg.priceHP, priceHC: cfg.priceHC, hc: cfg.hc, history, events };
+    const name = `chauffage-${new Date().toISOString().slice(0, 10)}.json`;
+    const file = new File([JSON.stringify(data)], name, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: name });
+      $('#msg').textContent = 'Export partagé.';
+    } else {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; a.click();
+      $('#msg').textContent = 'Export téléchargé.';
+    }
+  } catch (err) { if (err.name !== 'AbortError') $('#msg').textContent = `Échec de l’export : ${err.message}`; }
+};
 $('#resetHist').onclick = async () => {
   if (!confirm('Effacer tout l’historique des mesures ? La courbe du dashboard repartira aussi de zéro. C’est définitif.')) return;
   try { await api.resetHistory(); $('#msg').textContent = 'Historique effacé. Les nouvelles mesures arrivent dans les 5 minutes.'; }
