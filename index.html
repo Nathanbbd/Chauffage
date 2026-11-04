@@ -629,7 +629,13 @@ function renderDial() {
     eco: 'Eco forcé',
     horsgel: 'Chauffage coupé',
   }[s.mode];
-  if (s.boost && !s.window) { st.className = 'status on'; st.textContent = `Boost : chauffe à fond jusqu’à ${hhmm(s.boost)}`; }
+  if (s.boost && !s.window) {
+    // Température estimée en fin de boost, avec la vitesse de chauffe apprise (plafonnée par le bouton du radiateur, 7/8 ≈ 25 °C)
+    const left = Math.max(0, (s.boost - Date.now()) / 60e3);
+    const end = s.temp == null ? null : Math.min(25, Math.round(s.temp + left / rateOf(s.id).min));
+    st.className = 'status on';
+    st.textContent = `Boost jusqu’à ${hhmm(s.boost)}${end != null && end > Math.round(s.temp) ? `, environ ${end} °C à la fin` : ''}`;
+  }
   if (s.window) { st.className = 'status win'; st.textContent = `Fenêtre ouverte, chauffage coupé jusqu’à ${hhmm(s.window)}`; }
 
   const pl = $('#profline');
