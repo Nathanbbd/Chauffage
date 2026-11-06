@@ -651,7 +651,7 @@ function renderDial() {
   if (s.boost && !s.window) {
     // Température estimée en fin de boost, avec la vitesse de chauffe apprise (plafonnée par le bouton du radiateur, 7/8 ≈ 25 °C)
     const left = Math.max(0, (s.boost - Date.now()) / 60e3);
-    const end = s.temp == null ? null : Math.min(25, Math.round(s.temp + left / rateOf(s.id).min));
+    const end = s.temp == null ? null : tempAfter(s.id, s.temp, left);
     st.className = 'status on';
     st.textContent = `Boost jusqu’à ${hhmm(s.boost)}${end != null && end > Math.round(s.temp) ? `, environ ${end} °C à la fin` : ''}`;
   }
@@ -859,7 +859,9 @@ async function renderInfos() {
   $('#stCost').textContent = `${fmt(c.eur, 2)} €`;
   const all = ROOMS.reduce((s, r) => s + cost(r.id).eur, 0);
   const rt = rateOf(current);
-  $('#stRate').textContent = `Vitesse de chauffe : 1 °C toutes les ${rt.min} min environ ${rt.n ? `(mesurée sur ${rt.n} chauffe${rt.n > 1 ? 's' : ''})` : '(valeur de départ, en attendant assez de mesures)'}.`;
+  $('#stRate').textContent = `Vitesse de chauffe : 1 °C toutes les ${rt.min} min jusqu’à 20 °C, ${rt.high ?? Math.round(rt.min * HIGH_FACTOR)} min au-delà`
+    + (rt.n ? ` (mesurée sur ${rt.n} degrés gagnés${rt.high ? '' : ', au-delà de 20 °C estimé'})` : ' (valeurs de départ, en attendant assez de mesures)')
+    + (rt.cool != null ? `. Sans chauffer, la pièce perd environ ${fmt(Math.abs(rt.cool), 1)} °C par heure la nuit.` : '.');
   $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € sur 24 h, soit environ ${Math.round(all * 30)} € par mois à ce rythme.`;
 
   const pts = (hist[current] || []).filter(p => p.temp != null);
@@ -1084,30 +1086,59 @@ function renderAlert(unreachable) {
 }
 
 /* Estimation « consigne atteinte vers… » : vitesse de chauffe apprise sur les 7 derniers jours */
-const DEFAULT_RATE = { salon: 10, chambre: 13 };   // min par °C, mesurés début novembre 2026
+const DEFAULT_RATE = { salon: 10, chambre: 15 };   // min par °C sous 20 °C, mesurés du 3 au 6 novembre 2026
 let rates = {}, ratesAt = 0;
 const rateOf = id => rates[id] || { min: DEFAULT_RATE[id] ?? 12, n: 0 };
+/* Vitesse de chauffe apprise degré par degré. Au-dessus de 20 °C, c'est plus lent : le thermostat interne
+   du radiateur (bouton à 7/8) commence à couper par moments. On apprend donc deux vitesses par pièce. */
+const HIGH_LEVEL = 20, HIGH_FACTOR = 1.7;
 function learnRates(hist, evts) {
   const out = {};
+  const med = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
   for (const [id, pts] of Object.entries(hist || {})) {
     const wins = (evts || []).filter(e => e.type === 'window' && e.room === id).map(e => e.t);
-    const per = [];
+    const low = [], high = [];
     for (let i = 0; i < pts.length; i++) {
       if (!pts[i].heating || (i > 0 && pts[i - 1].heating)) continue;          // début d'une chauffe
       let j = i; while (j < pts.length && pts[j].heating) j++;
       if (j >= pts.length) break;                                                // chauffe en cours : pas encore mesurable
-      const t0 = pts[i].t, t1 = pts[j].t, gain = pts[j].temp - pts[i].temp, min = (t1 - t0) / 60e3;
-      const windowNear = wins.some(w => w > t0 - 2 * 36e5 && w < t1);           // fenêtre ouverte : chauffe faussée
-      if (gain >= 1 && min >= 4 && min <= 180 && !windowNear) per.push(min / gain);
+      if (wins.some(w => w > pts[i].t - 2 * 36e5 && w < pts[j].t)) continue;     // fenêtre ouverte : chauffe faussée
+      let t0 = pts[i].t, cur = pts[i].temp;
+      for (let k = i + 1; k <= j; k++) {                                         // chaque degré gagné pendant la chauffe
+        if (pts[k].temp > cur) {
+          const min = (pts[k].t - t0) / 60e3;
+          if (min >= 3 && min <= 120) (cur >= HIGH_LEVEL ? high : low).push(min / (pts[k].temp - cur));
+          t0 = pts[k].t; cur = pts[k].temp;
+        }
+      }
     }
-    const last = per.slice(-10).sort((a, b) => a - b);
-    if (last.length >= 2) out[id] = { min: Math.round(Math.min(60, Math.max(4, last[Math.floor(last.length / 2)]))), n: last.length };
+    // Refroidissement sans chauffer, la nuit (0 h – 6 h) : pente moyenne en °C par heure
+    const night = pts.filter(p => !p.heating && p.temp != null && new Date(p.t).getHours() < 6);
+    let cool = null;
+    if (night.length > 24) {
+      const slopes = [];
+      for (let k = 12; k < night.length; k++) if (night[k].t - night[k - 12].t <= 65 * 60e3) slopes.push(night[k].temp - night[k - 12].temp);
+      if (slopes.length > 12) cool = slopes.reduce((a, b) => a + b, 0) / slopes.length;
+    }
+    const lo = low.slice(-12), hi = high.slice(-6);
+    if (lo.length >= 2) out[id] = {
+      min: Math.round(Math.min(60, Math.max(4, med(lo)))),
+      high: hi.length >= 2 ? Math.round(Math.min(90, Math.max(4, med(hi)))) : null,
+      n: lo.length + hi.length, cool,
+    };
   }
   rates = out;
 }
+const stepMin = (id, level) => { const r = rateOf(id); return level >= HIGH_LEVEL ? (r.high ?? Math.round(r.min * HIGH_FACTOR)) : r.min; };
+function minutesTo(id, from, to) { let m = 0; for (let l = Math.round(from); l < to; l++) m += stepMin(id, l); return m; }
+function tempAfter(id, from, minutes) {                                          // température atteinte après X min de chauffe
+  let t = Math.round(from), left = minutes;
+  while (t < 25 && left >= stepMin(id, t)) { left -= stepMin(id, t); t++; }
+  return t < 25 && left >= stepMin(id, t) / 2 ? t + 1 : t;                      // arrondi au degré le plus proche
+}
 function etaText(s, sp) {
   if (s.mode !== 'auto' || s.boost || s.window || typeof sp !== 'number' || s.temp == null || sp <= s.temp) return '';
-  const t = Date.now() + (sp - s.temp) * rateOf(s.id).min * 60e3;
+  const t = Date.now() + minutesTo(s.id, s.temp, sp) * 60e3;
   return `, vers ${hhmm(Math.ceil(t / 3e5) * 3e5)}`;                            // arrondi aux 5 min
 }
 async function updateRates() {
