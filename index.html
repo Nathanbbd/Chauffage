@@ -117,6 +117,8 @@ nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:
 .vac{display:flex;gap:8px;align-items:end;margin-top:10px}
 .vacbox{display:grid;gap:10px;margin-top:10px;background:var(--surface);border-radius:14px;padding:14px}
 .vacbox label{display:grid;gap:5px;font-size:.9rem;min-width:0}
+input[type=date],input[type=time]{-webkit-appearance:none;appearance:none;min-width:0;display:block}
+.vacbox .row2{gap:10px}
 .vacbox input,.vacbox select{width:100%;min-width:0;box-sizing:border-box;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;color:var(--ink);font-size:16px}
 .vac label{flex:1}
 .vac input{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink)}
@@ -192,7 +194,7 @@ body.fit .modes{margin-top:14px}
         <label class="muted">Retour le<input type="date" id="vacDate"></label>
         <label class="muted">vers<input type="time" id="vacTime" value="18:00"></label>
       </div>
-      <label class="muted">Rallumer le chauffage
+      <label class="muted">Fin du hors-gel et retour au chauffage normal
         <select id="vacLead"><option value="60">1 h avant le retour</option><option value="120" selected>2 h avant le retour</option><option value="180">3 h avant le retour</option><option value="300">5 h avant le retour</option></select></label>
       <button class="btn" id="vacOk">Partir en vacances</button>
     </div>
@@ -382,6 +384,10 @@ const AWAY_DELAY = 15 * 60e3;
 const isHome = (p, now) => !!p && (p.home || now - p.t < AWAY_DELAY);
 function effectivePresence(manual, people, sched, now) {
   if (manual && (manual.until == null || manual.until > now)) return manual;   // Vacances, Je pars… restent prioritaires
+  // Fin des vacances : jusqu'à 3 h après l'heure de retour annoncée, on chauffe comme si quelqu'un était là
+  // (le Wi-Fi ne voit encore personne pendant la relance anticipée)
+  if (manual?.profile === 'vacances' && manual.returnAt && now < manual.returnAt + 3 * 36e5)
+    return planAt(sched, now).profile === 'absent' ? { profile: 'maison', until: manual.returnAt + 3 * 36e5, source: 'retour' } : null;
   if (!sched.autoPresence || !people || !Object.keys(people).length) return null;
   if (!Object.values(people).some(p => isHome(p, now))) return { profile: 'absent', until: null, source: 'wifi' };
   if (planAt(sched, now).profile === 'absent') return { profile: 'maison', until: null, source: 'wifi' };
@@ -517,7 +523,7 @@ const mock = (() => {
       boost: room.boostUntil > Date.now() ? room.boostUntil : null };
   };
   const people = { nathan: null, jade: null };
-  const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until, autoPresence: !!sched.autoPresence, returnAt: tg.profile === 'vacances' ? presence?.returnAt ?? null : null, people: structuredClone(people) }; };
+  const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until, autoPresence: !!sched.autoPresence, returnAt: tg.profile === 'vacances' || tg.source === 'retour' ? presence?.returnAt ?? null : null, people: structuredClone(people) }; };
   return {
     rooms: async () => ROOMS.map(r => view(state[r.id])),
     set: async (id, p) => {
@@ -733,6 +739,8 @@ function renderPresence(full) {
   $('#pName').textContent = profName(pres.profile);
   $('#pWhy').textContent = pres.source === 'wifi'
     ? (pres.profile === 'absent' ? 'Selon le Wi-Fi : personne n’est à l’appart' : 'Selon le Wi-Fi : quelqu’un est à l’appart')
+    : pres.source === 'retour' && pres.returnAt
+      ? `Retour de vacances prévu à ${hhmm(pres.returnAt)} : l’appart se réchauffe`
     : pres.profile === 'vacances' && pres.returnAt
       ? `Retour prévu ${dayText(pres.returnAt)}, chauffage relancé à ${hhmm(pres.until)}`
       : (pres.source === 'manuel' ? 'Forcé ' : 'Selon le planning ') + untilText(pres.until, pres.source);
