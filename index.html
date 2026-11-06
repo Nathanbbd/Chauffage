@@ -115,6 +115,9 @@ nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:
 .quick button{border:1px solid var(--line);background:none;border-radius:12px;padding:13px 6px;font-weight:600}
 .quick button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .vac{display:flex;gap:8px;align-items:end;margin-top:10px}
+.vacbox{display:grid;gap:10px;margin-top:10px;background:var(--surface);border-radius:14px;padding:14px}
+.vacbox label{display:grid;gap:5px;font-size:.9rem;min-width:0}
+.vacbox input,.vacbox select{width:100%;min-width:0;box-sizing:border-box;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;color:var(--ink);font-size:16px}
 .vac label{flex:1}
 .vac input{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink)}
 .block{background:var(--surface);border-radius:14px;padding:4px 14px 10px;margin-bottom:8px}
@@ -184,9 +187,14 @@ body.fit .modes{margin-top:14px}
       <button data-act="vacation">Vacances</button>
       <button data-act="planning">Suivre le planning</button>
     </div>
-    <div class="vac" id="vacBox" hidden>
-      <label class="muted">Retour le<input type="date" id="vacDate"></label>
-      <button class="btn" id="vacOk" style="flex:0 0 auto">Partir</button>
+    <div class="vacbox" id="vacBox" hidden>
+      <div class="row2">
+        <label class="muted">Retour le<input type="date" id="vacDate"></label>
+        <label class="muted">vers<input type="time" id="vacTime" value="18:00"></label>
+      </div>
+      <label class="muted">Rallumer le chauffage
+        <select id="vacLead"><option value="60">1 h avant le retour</option><option value="120" selected>2 h avant le retour</option><option value="180">3 h avant le retour</option><option value="300">5 h avant le retour</option></select></label>
+      <button class="btn" id="vacOk">Partir en vacances</button>
     </div>
     <h2>Températures par profil</h2>
     <div id="profiles"></div>
@@ -450,7 +458,7 @@ const api = {
   schedule:       ()            => cfg.demo ? mock.schedule()              : req('/schedule'),
   saveSchedule:   s             => cfg.demo ? mock.saveSchedule(s)         : post('/schedule', s, 'PUT'),
   presence:       ()            => cfg.demo ? mock.presence()              : req('/presence'),
-  presenceAction: (action, until) => cfg.demo ? mock.presenceAction(action, until) : post('/presence', { action, until }),
+  presenceAction: (action, until, returnAt) => cfg.demo ? mock.presenceAction(action, until, returnAt) : post('/presence', { action, until, returnAt }),
   weeklyNow:      ()            => cfg.demo ? Promise.reject(new Error('indisponible en mode démo')) : post('/notify/weekly', {}),
   notifyTest:     topic         => cfg.demo ? Promise.reject(new Error('indisponible en mode démo')) : post('/notify/test', { topic }),
   setPerson:      (person, action) => cfg.demo ? mock.setPerson(person, action) : post('/presence', { person, action, force: true }),
@@ -509,7 +517,7 @@ const mock = (() => {
       boost: room.boostUntil > Date.now() ? room.boostUntil : null };
   };
   const people = { nathan: null, jade: null };
-  const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until, autoPresence: !!sched.autoPresence, people: structuredClone(people) }; };
+  const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until, autoPresence: !!sched.autoPresence, returnAt: tg.profile === 'vacances' ? presence?.returnAt ?? null : null, people: structuredClone(people) }; };
   return {
     rooms: async () => ROOMS.map(r => view(state[r.id])),
     set: async (id, p) => {
@@ -538,7 +546,7 @@ const mock = (() => {
     schedule: async () => structuredClone(sched),
     saveSchedule: async s => { sched = structuredClone(s); tick(); return structuredClone(sched); },
     presence: async () => presenceView(),
-    presenceAction: async (action, until) => { presence = presenceFor(action, sched, Date.now(), until); tick(); return presenceView(); },
+    presenceAction: async (action, until, returnAt) => { presence = presenceFor(action, sched, Date.now(), until); if (presence && action === 'vacation') presence.returnAt = returnAt; tick(); return presenceView(); },
     setPerson: async (who, action) => { people[who] = { home: action === 'home', since: Date.now(), leaving: false }; return presenceView(); },
     resetHistory: async () => { ROOMS.forEach(r => { hist[r.id].length = 0; }); evts.length = 0; return { ok: true }; },
   };
@@ -565,6 +573,11 @@ function isOffPeak(t) {
 const roomName = id => ROOMS.find(r => r.id === id)?.name ?? id;
 const profName = id => PROFILES.find(p => p.id === id)?.name ?? id;
 const spText = v => (typeof v === 'number' ? `${fmt(v)} °C` : 'Hors-gel');
+function dayText(t) {
+  const d = new Date(t), today = new Date();
+  return d.toDateString() === today.toDateString() ? `aujourd’hui à ${hhmm(t)}`
+    : `le ${d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${hhmm(t)}`;
+}
 function untilText(t, source) {
   if (t == null) return source === 'manuel' ? 'jusqu’à nouvel ordre' : '';
   const d = new Date(t), today = new Date();
@@ -720,7 +733,9 @@ function renderPresence(full) {
   $('#pName').textContent = profName(pres.profile);
   $('#pWhy').textContent = pres.source === 'wifi'
     ? (pres.profile === 'absent' ? 'Selon le Wi-Fi : personne n’est à l’appart' : 'Selon le Wi-Fi : quelqu’un est à l’appart')
-    : (pres.source === 'manuel' ? 'Forcé ' : 'Selon le planning ') + untilText(pres.until, pres.source);
+    : pres.profile === 'vacances' && pres.returnAt
+      ? `Retour prévu ${dayText(pres.returnAt)}, chauffage relancé à ${hhmm(pres.until)}`
+      : (pres.source === 'manuel' ? 'Forcé ' : 'Selon le planning ') + untilText(pres.until, pres.source);
   const names = { nathan: 'Nathan', jade: 'Jade' };
   $('#people').innerHTML = pres.autoPresence ? Object.entries(pres.people || {}).map(([id, p]) => {
     const e = id === 'jade' ? 'e' : '';
@@ -742,7 +757,13 @@ $('#quick').addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.act === 'vacation') {
     $('#vacBox').hidden = !$('#vacBox').hidden;
-    if (!$('#vacDate').value) $('#vacDate').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+    const ret = pres?.returnAt, local = t => new Date(t - new Date(t).getTimezoneOffset() * 60e3).toISOString();
+    if (ret) {
+      $('#vacDate').value = local(ret).slice(0, 10); $('#vacTime').value = local(ret).slice(11, 16);
+      const lead = Math.round((ret - pres.until) / 60e3);
+      if ([...$('#vacLead').options].some(o => +o.value === lead)) $('#vacLead').value = String(lead);
+    } else if (!$('#vacDate').value) $('#vacDate').value = local(Date.now() + 7 * 864e5).slice(0, 10);
+    $('#vacOk').textContent = pres?.profile === 'vacances' ? 'Mettre à jour le retour' : 'Partir en vacances';
     return;
   }
   $('#vacBox').hidden = true;
@@ -751,9 +772,10 @@ $('#quick').addEventListener('click', async e => {
 });
 $('#vacOk').onclick = async () => {
   const d = $('#vacDate').value; if (!d) return;
-  // Retour le jour J à 00:00 : le planning reprend la veille au soir pour un appart chaud à l'arrivée
-  const until = new Date(d + 'T00:00').getTime();
-  try { pres = await api.presenceAction('vacation', until); } catch (err) { showConn(err); }
+  // Le chauffage reprend un peu avant l'heure de retour, pour un appart chaud à l'arrivée
+  const returnAt = new Date(`${d}T${$('#vacTime').value || '18:00'}`).getTime();
+  const until = returnAt - Number($('#vacLead').value) * 60e3;
+  try { pres = await api.presenceAction('vacation', until, returnAt); } catch (err) { showConn(err); }
   $('#vacBox').hidden = true; renderPresence(false); refresh();
 };
 
