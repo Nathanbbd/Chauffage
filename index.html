@@ -217,6 +217,7 @@ body.fit .modes{margin-top:14px}
       <div class="stat"><strong id="stCost">–</strong><span>estimés</span></div>
     </div>
     <p class="total" id="stTotal"></p>
+    <p class="total" id="stMonth" style="color:var(--ink);font-weight:600"></p>
     <p class="total" id="stRate"></p>
     <h2>Température</h2>
     <div class="chart">
@@ -465,6 +466,7 @@ const api = {
   saveSchedule:   s             => cfg.demo ? mock.saveSchedule(s)         : post('/schedule', s, 'PUT'),
   presence:       ()            => cfg.demo ? mock.presence()              : req('/presence'),
   presenceAction: (action, until, returnAt) => cfg.demo ? mock.presenceAction(action, until, returnAt) : post('/presence', { action, until, returnAt }),
+  costs:          ()            => cfg.demo ? mock.costs()                 : req('/costs'),
   weeklyNow:      ()            => cfg.demo ? Promise.reject(new Error('indisponible en mode démo')) : post('/notify/weekly', {}),
   notifyTest:     topic         => cfg.demo ? Promise.reject(new Error('indisponible en mode démo')) : post('/notify/test', { topic }),
   setPerson:      (person, action) => cfg.demo ? mock.setPerson(person, action) : post('/presence', { person, action, force: true }),
@@ -554,6 +556,11 @@ const mock = (() => {
     presence: async () => presenceView(),
     presenceAction: async (action, until, returnAt) => { presence = presenceFor(action, sched, Date.now(), until); if (presence && action === 'vacation') presence.returnAt = returnAt; tick(); return presenceView(); },
     setPerson: async (who, action) => { people[who] = { home: action === 'home', since: Date.now(), leaving: false }; return presenceView(); },
+    costs: async () => {                                                        // démo : ordre de grandeur plausible
+      const n = new Date(), start = new Date(n.getFullYear(), n.getMonth(), 1).getTime(), end = new Date(n.getFullYear(), n.getMonth() + 1, 1).getTime();
+      const days = (Date.now() - start) / 864e5;
+      return { monthStart: start, monthEnd: end, since: start, monthToDate: days * 1.1, avgPerDay: 1.1, daysUsed: 7, projection: 1.1 * (end - start) / 864e5 };
+    },
     resetHistory: async () => { ROOMS.forEach(r => { hist[r.id].length = 0; }); evts.length = 0; return { ok: true }; },
   };
 })();
@@ -843,6 +850,21 @@ $('#schedForm').addEventListener('submit', async e => {
 /* =========================================================
    INFOS
    ========================================================= */
+/* Mois en cours : coût réel depuis le 1er + projection (calculés par le Worker, mis en cache 5 min) */
+let monthCache = { at: 0, data: null };
+async function renderMonth() {
+  if (Date.now() - monthCache.at > 5 * 60e3) {
+    try { monthCache = { at: Date.now(), data: await api.costs() }; } catch { return; }
+  }
+  const c = monthCache.data, el = $('#stMonth'); if (!c) return;
+  const month = new Date(c.monthStart).toLocaleDateString('fr-FR', { month: 'long' });
+  const sinceDay = new Date(c.since).getDate(), lastDay = new Date(c.monthEnd - 1).getDate();
+  let txt = `${month[0].toUpperCase() + month.slice(1)} : ${fmt(c.monthToDate, 2)} € depuis le ${sinceDay === 1 ? '1er' : sinceDay}`;
+  if (c.projection != null) txt += `, environ ${Math.round(c.projection)} € prévus d’ici le ${lastDay}`;
+  if (c.avgPerDay != null) txt += ` (${fmt(c.avgPerDay, 2)} € par jour en moyenne sur ${c.daysUsed >= 6.9 ? '7 jours' : `${Math.max(1, Math.round(c.daysUsed))} jour${Math.round(c.daysUsed) > 1 ? 's' : ''}`}).`;
+  el.textContent = txt;
+}
+
 async function renderInfos() {
   let hist, evts;
   try { [hist, evts] = await Promise.all([api.history(), api.events()]); } catch (err) { showConn(err); return; }
@@ -862,7 +884,8 @@ async function renderInfos() {
   $('#stRate').textContent = `Vitesse de chauffe : 1 °C toutes les ${rt.min} min jusqu’à 20 °C, ${rt.high ?? Math.round(rt.min * HIGH_FACTOR)} min au-delà`
     + (rt.n ? ` (mesurée sur ${rt.n} degrés gagnés${rt.high ? '' : ', au-delà de 20 °C estimé'})` : ' (valeurs de départ, en attendant assez de mesures)')
     + (rt.cool != null ? `. Sans chauffer, la pièce perd environ ${fmt(Math.abs(rt.cool), 1)} °C par heure la nuit.` : '.');
-  $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € sur 24 h, soit environ ${Math.round(all * 30)} € par mois à ce rythme.`;
+  $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € sur les dernières 24 h.`;
+  renderMonth();
 
   const pts = (hist[current] || []).filter(p => p.temp != null);
   const W = 600, H = 220, L = 34, B = 24, T = 10;
