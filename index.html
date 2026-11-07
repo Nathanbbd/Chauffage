@@ -76,10 +76,18 @@ body.fit.alerting .dial{width:min(82vw, clamp(140px, calc(100svh - 462px - 92px 
 h2{font-size:1.1rem;margin:28px 0 10px;font-weight:600}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .stat{background:var(--surface);border-radius:14px;padding:12px}
-.stat strong{display:block;font-size:1.4rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.log li.empty{display:block}
+.stat strong{display:block;white-space:nowrap;font-size:1.25rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .stat span{color:var(--muted);font-size:.8rem}
 .total{margin-top:8px;color:var(--muted);font-size:.9rem}
-.chart{background:var(--surface);border-radius:14px;padding:12px 8px 6px}
+.daynav{display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px}
+.daynav h2{margin:0;text-align:center;flex:1}
+.daynav button{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.4rem;line-height:1;color:var(--ink)}
+.daynav button:disabled{opacity:.3}
+.dots{display:flex;justify-content:center;gap:6px;padding:8px 0 2px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
+.dots i.on{background:var(--ink)}
+.chart{touch-action:pan-y;background:var(--surface);border-radius:14px;padding:12px 8px 6px}
 .chart svg{display:block;width:100%;height:auto}
 .legend{display:flex;gap:14px;font-size:.78rem;color:var(--muted);padding:6px 6px 0}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
@@ -210,7 +218,11 @@ body.fit .modes{margin-top:14px}
 
   <!-- INFOS -->
   <section id="tab-infos" hidden>
-    <h2>Dernières 24 h</h2>
+    <div class="daynav">
+      <button type="button" id="dayPrev" aria-label="Jour précédent">‹</button>
+      <h2 id="dayLabel">Aujourd’hui</h2>
+      <button type="button" id="dayNext" aria-label="Jour suivant">›</button>
+    </div>
     <div class="stats">
       <div class="stat"><strong id="stTime">–</strong><span>de chauffe</span></div>
       <div class="stat"><strong id="stKwh">–</strong><span>consommés</span></div>
@@ -220,9 +232,10 @@ body.fit .modes{margin-top:14px}
     <p class="total" id="stMonth" style="color:var(--ink);font-weight:600"></p>
     <p class="total" id="stRate"></p>
     <h2>Température</h2>
-    <div class="chart">
+    <div class="chart" id="chartBox">
       <svg viewBox="0 0 600 220" id="chart" role="img" aria-label="Courbe de température sur 24 heures"></svg>
       <div class="legend"><span><i style="background:var(--ink)"></i>Température</span><span><i style="background:var(--heat-soft);outline:1px solid var(--heat)"></i>Chauffe</span><span><i style="background:var(--muted)"></i>Consigne</span></div>
+      <div class="dots" id="dayDots"></div>
     </div>
     <h2>Déclenchements</h2>
     <ul class="log" id="log"></ul>
@@ -460,7 +473,7 @@ const api = {
   rooms:          ()            => cfg.demo ? mock.rooms()                 : req('/rooms'),
   set:            (id, patch)   => cfg.demo ? mock.set(id, patch)          : post('/rooms/' + id, patch),
   history:        (h = 24)      => cfg.demo ? mock.history()               : req(`/history?hours=${h}`),
-  allEvents:      ()            => cfg.demo ? mock.events()                : req('/events?limit=200'),
+  allEvents:      ()            => cfg.demo ? mock.events()                : req('/events?limit=1000'),
   events:         ()            => cfg.demo ? mock.events()                : req('/events?limit=40'),
   schedule:       ()            => cfg.demo ? mock.schedule()              : req('/schedule'),
   saveSchedule:   s             => cfg.demo ? mock.saveSchedule(s)         : post('/schedule', s, 'PUT'),
@@ -865,14 +878,57 @@ async function renderMonth() {
   el.textContent = txt;
 }
 
+/* Infos jour par jour : 0 = aujourd'hui, 1 = hier… jusqu'à 7 jours en arrière (glisser sur la courbe ou ‹ ›) */
+const MAX_DAYS = 7;
+let dayOffset = 0, infosCache = { at: 0, hist: null, evts: null };
+const dayBounds = k => { const a = new Date(); a.setHours(0, 0, 0, 0); a.setDate(a.getDate() - k); const b = new Date(a); b.setDate(b.getDate() + 1); return [a.getTime(), b.getTime()]; };
+function dayName(k) {
+  if (k === 0) return 'Aujourd’hui';
+  if (k === 1) return 'Hier';
+  const s = new Date(dayBounds(k)[0]).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' });
+  return s[0].toUpperCase() + s.slice(1);
+}
+function goDay(delta) {
+  const k = Math.min(MAX_DAYS, Math.max(0, dayOffset + delta));
+  if (k !== dayOffset) { dayOffset = k; renderInfos(); }
+}
+$('#dayPrev').onclick = () => goDay(1);
+$('#dayNext').onclick = () => goDay(-1);
+{ // glisser sur la courbe : vers la droite = jour d'avant, vers la gauche = jour d'après
+  let sx = 0, sy = 0;
+  const box = $('#chartBox');
+  box.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  box.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) goDay(dx > 0 ? 1 : -1);
+  });
+}
+
 async function renderInfos() {
-  let hist, evts;
-  try { [hist, evts] = await Promise.all([api.history(), api.events()]); } catch (err) { showConn(err); return; }
-  const step = pts => pts.length > 1 ? (pts[pts.length - 1].t - pts[0].t) / (pts.length - 1) / 36e5 : 5 / 60;
+  if (!infosCache.hist || Date.now() - infosCache.at > 2 * 60e3) {
+    try {
+      const [hist, evts] = await Promise.all([api.history(24 * (MAX_DAYS + 1)), api.allEvents()]);
+      infosCache = { at: Date.now(), hist, evts };
+    } catch (err) { showConn(err); if (!infosCache.hist) return; }
+  }
+  const { hist, evts } = infosCache;
+  const [d0, d1] = dayBounds(dayOffset);
+  const inDay = p => p.t >= d0 && p.t < d1;
+
+  $('#dayLabel').textContent = dayName(dayOffset);
+  $('#dayPrev').disabled = dayOffset >= MAX_DAYS;
+  $('#dayNext').disabled = dayOffset === 0;
+  $('#dayDots').innerHTML = Array.from({ length: MAX_DAYS + 1 }, (_, i) => `<i class="${MAX_DAYS - i === dayOffset ? 'on' : ''}"></i>`).join('');
+
+  // Chiffres du jour : chaque relevé en chauffe compte jusqu'au relevé suivant (10 min max)
   const cost = id => {
-    const pts = hist[id] || [], h = step(pts), kw = (cfg.power[id] || 0) / 1000;
+    const all = hist[id] || [], kw = (cfg.power[id] || 0) / 1000;
     let hours = 0, eur = 0;
-    for (const p of pts) if (p.heating) { hours += h; eur += h * kw * (isOffPeak(p.t) ? cfg.priceHC : cfg.priceHP); }
+    for (let i = 0; i < all.length - 1; i++) {
+      const p = all[i]; if (!p.heating || !inDay(p)) continue;
+      const h = Math.min(all[i + 1].t - p.t, 10 * 60e3) / 36e5;
+      hours += h; eur += h * kw * (isOffPeak(p.t) ? cfg.priceHC : cfg.priceHP);
+    }
     return { hours, kwh: hours * kw, eur };
   };
   const c = cost(current);
@@ -880,21 +936,22 @@ async function renderInfos() {
   $('#stKwh').textContent = `${fmt(c.kwh, 1)} kWh`;
   $('#stCost').textContent = `${fmt(c.eur, 2)} €`;
   const all = ROOMS.reduce((s, r) => s + cost(r.id).eur, 0);
+  $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € ${dayOffset === 0 ? 'aujourd’hui (jusqu’à maintenant)' : dayOffset === 1 ? 'hier' : 'ce jour-là'}.`;
   const rt = rateOf(current);
   $('#stRate').textContent = `Vitesse de chauffe : 1 °C toutes les ${rt.min} min jusqu’à 20 °C, ${rt.high ?? Math.round(rt.min * HIGH_FACTOR)} min au-delà`
     + (rt.n ? ` (mesurée sur ${rt.n} degrés gagnés${rt.high ? '' : ', au-delà de 20 °C estimé'})` : ' (valeurs de départ, en attendant assez de mesures)')
     + (rt.cool != null ? `. Sans chauffer, la pièce perd environ ${fmt(Math.abs(rt.cool), 1)} °C par heure la nuit.` : '.');
-  $('#stTotal').textContent = `Les deux pièces : ${fmt(all, 2)} € sur les dernières 24 h.`;
   renderMonth();
 
-  const pts = (hist[current] || []).filter(p => p.temp != null);
+  // Courbe du jour, de 0 h à 24 h
+  const pts = (hist[current] || []).filter(p => p.temp != null && inDay(p));
   const W = 600, H = 220, L = 34, B = 24, T = 10;
-  if (pts.length < 2) { $('#chart').innerHTML = `<text x="300" y="110" text-anchor="middle" font-size="14" fill="var(--muted)">Pas encore assez de relevés</text>`; }
-  else {
-    const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  if (pts.length < 2) {
+    $('#chart').innerHTML = `<text x="300" y="110" text-anchor="middle" font-size="14" fill="var(--muted)">Pas de mesures ce jour-là</text>`;
+  } else {
     const vals = pts.flatMap(p => [p.temp, p.sp]).filter(v => typeof v === 'number');
     const lo = Math.floor(Math.min(...vals) - .5), hi = Math.ceil(Math.max(...vals) + .5);
-    const X = t => L + (t - t0) / (t1 - t0 || 1) * (W - L - 6);
+    const X = t => L + (t - d0) / (d1 - d0) * (W - L - 6);
     const Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
     let svg = '', startT = null;
     pts.forEach((p, i) => {
@@ -908,18 +965,17 @@ async function renderInfos() {
       svg += `<line x1="${L}" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1"/>`;
       svg += `<text x="${L - 6}" y="${Y(v) + 4}" font-size="11" fill="var(--muted)" text-anchor="end">${v}°</text>`;
     }
-    for (let t = Math.ceil(t0 / 216e5) * 216e5; t <= t1; t += 216e5) {
-      svg += `<text x="${X(t)}" y="${H - 6}" font-size="11" fill="var(--muted)" text-anchor="middle">${hhmm(t).slice(0, 2)} h</text>`;
+    for (let hr = 0; hr <= 24; hr += 6) {
+      const x = L + hr / 24 * (W - L - 6);
+      svg += `<text x="${x}" y="${H - 6}" font-size="11" fill="var(--muted)" text-anchor="${hr === 0 ? 'start' : hr === 24 ? 'end' : 'middle'}">${hr} h</text>`;
     }
-    // Consigne : coupée là où le profil est en hors-gel
-    let d = '', pen = false;
+    let d = '', pen = false;                                   // consigne, coupée là où le profil est en hors-gel
     for (const p of pts) {
       if (typeof p.sp !== 'number') { pen = false; continue; }
       d += `${pen ? 'L' : 'M'}${X(p.t)} ${Y(p.sp)} `; pen = true;
     }
     svg += `<path d="${d}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>`;
-    // Lissage pour l'affichage uniquement (moyenne glissante ~1 h)
-    const SMOOTH = 6;
+    const SMOOTH = 6;                                           // lissage pour l'affichage (moyenne glissante ~1 h)
     const smooth = pts.map((p, i) => {
       const win = pts.slice(Math.max(0, i - SMOOTH), i + SMOOTH + 1);
       return { t: p.t, temp: win.reduce((s, q) => s + q.temp, 0) / win.length };
@@ -935,10 +991,10 @@ async function renderInfos() {
     window: 'Fenêtre ouverte détectée', window_end: 'Fenêtre fermée',
     boost: 'Boost 30 min', boost_end: 'Boost arrêté',
   }[e.type]);
-  const list = evts.filter(e => e.room === current);
+  const list = (evts || []).filter(e => e.room === current && inDay(e) && label(e));
   $('#log').innerHTML = list.length
     ? list.map(e => `<li><time>${hhmm(e.t)}</time><span>${label(e)}</span><span class="t">${e.temp == null ? '' : fmt(e.temp) + ' °C'}</span></li>`).join('')
-    : `<li class="empty">Aucun déclenchement pour ${roomName(current)} sur la période.</li>`;
+    : `<li class="empty">Aucun déclenchement pour ${roomName(current)} ce jour-là.</li>`;
 }
 
 /* =========================================================
@@ -1054,7 +1110,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   const shown = tab === 'reglages' && !pinOk ? 'pin' : tab;
   ['thermo', 'presence', 'infos', 'reglages', 'pin'].forEach(t => $('#tab-' + t).hidden = t !== shown);
   if (shown === 'pin') { $('#pin').value = ''; $('#pinMsg').textContent = ''; setTimeout(() => $('#pin').focus(), 50); return; }
-  if (tab === 'infos') renderInfos();
+  if (tab === 'infos') { dayOffset = 0; renderInfos(); }
   if (tab === 'presence') { $('#schedMsg').textContent = ''; loadPresence(true); }
   if (tab === 'reglages') fillForm();
 });
