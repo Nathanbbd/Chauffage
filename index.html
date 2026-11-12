@@ -53,6 +53,8 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .now sup{font-size:1.6rem;font-weight:600;vertical-align:top;margin-left:2px}
 .sp{color:var(--muted);margin-top:6px}
 .sp b{color:var(--ink);font-weight:600}
+.hum{color:var(--muted);font-size:.8rem;margin-top:2px;min-height:1.2em}
+.hum.high{color:var(--warn)}
 .adjust{display:flex;justify-content:center;align-items:center;gap:14px;margin-top:-6px}
 .adjust .boost{width:auto;height:44px;padding:0 16px;border-radius:22px;border:1.5px solid var(--heat);background:none;color:var(--heat);font-size:.95rem;font-weight:600;min-width:132px}
 .adjust .boost.on{background:var(--heat);color:#fff}
@@ -170,6 +172,7 @@ body.fit .modes{margin-top:14px}
       <div class="center">
         <div class="now" id="now">–</div>
         <div class="sp">Consigne <b id="sp">–</b></div>
+        <div class="hum" id="hum"></div>
       </div>
     </div>
     <div class="adjust">
@@ -494,7 +497,7 @@ const mock = (() => {
   const STEP = 5 * 60e3, start = Date.now(), state = {}, hist = {}, evts = [];
   let sched = structuredClone(DEFAULT_SCHEDULE), presence = null;
   ROOMS.forEach((r, i) => {
-    const room = { id: r.id, mode: 'auto', temp: 17.4 + i * 0.6, heating: false, manualSp: null, manualUntil: null };
+    const room = { id: r.id, mode: 'auto', temp: 17.4 + i * 0.6, heating: false, manualSp: null, manualUntil: null, humidity: 54 + i * 9 };
     hist[r.id] = [];
     for (let k = 287; k >= 0; k--) {
       const t = start - k * STEP, tg = target(room, sched, null, t);
@@ -535,7 +538,7 @@ const mock = (() => {
     return { id: room.id, temp: room.temp, setpoint: tg.sp, mode: room.mode, heating: room.heating, updated: room.updated,
       profile: tg.profile, source: tg.source, until: tg.until, manual: tg.manual, manualUntil: room.manualUntil,
       window: room.windowUntil > Date.now() ? room.windowUntil : null,
-      boost: room.boostUntil > Date.now() ? room.boostUntil : null };
+      boost: room.boostUntil > Date.now() ? room.boostUntil : null, humidity: room.humidity };
   };
   const people = { nathan: null, jade: null };
   const presenceView = () => { const tg = target({ id: '_' }, sched, presence, Date.now()); return { profile: tg.profile, source: tg.source, until: tg.until, autoPresence: !!sched.autoPresence, returnAt: tg.profile === 'vacances' || tg.source === 'retour' ? presence?.returnAt ?? null : null, people: structuredClone(people) }; };
@@ -659,6 +662,9 @@ function renderDial() {
     <text x="${pt(405)[0] + 2}" y="${pt(405)[1] + 30}" font-size="12" fill="var(--muted)" text-anchor="middle">${DIAL_MAX}°</text>`;
   $('#now').innerHTML = s.temp == null ? '–' : `${fmt(s.temp)}<sup>°</sup>`;
   $('#sp').textContent = spText(sp);
+  const hu = $('#hum');                                      // humidité, discrète ; en orange au-delà de 65 %
+  hu.textContent = s.humidity == null ? '' : `${Math.round(s.humidity)} % d’humidité`;
+  hu.className = 'hum' + (s.humidity > 65 ? ' high' : '');
 
   const st = $('#status');
   st.className = 'status' + (s.heating ? ' on' : '');
