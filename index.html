@@ -206,7 +206,7 @@ body.fit .modes{margin-top:14px}
         <label class="muted">vers<input type="time" id="vacTime" value="18:00"></label>
       </div>
       <label class="muted">Fin du hors-gel et retour au chauffage normal
-        <select id="vacLead"><option value="60">1 h avant le retour</option><option value="120" selected>2 h avant le retour</option><option value="180">3 h avant le retour</option><option value="300">5 h avant le retour</option></select></label>
+        <select id="vacLead"><option value="0" selected>Automatique (selon la température)</option><option value="60">1 h avant le retour</option><option value="120">2 h avant le retour</option><option value="180">3 h avant le retour</option><option value="300">5 h avant le retour</option></select></label>
       <button class="btn" id="vacOk">Partir en vacances</button>
     </div>
     <h2>Températures par profil</h2>
@@ -678,6 +678,12 @@ function renderDial() {
     eco: 'Eco forcé',
     horsgel: 'Chauffage coupé',
   }[s.mode];
+  if (s.preheat && s.mode === 'auto' && !s.boost && !s.window) {
+    st.className = 'status' + (s.heating ? ' on' : '');
+    st.textContent = s.preheat > Date.now()
+      ? `Relance anticipée : ${spText(sp)} pour ${hhmm(s.preheat)}`
+      : `Arrivée prévue à ${hhmm(s.preheat)} : maintien à ${spText(sp)}`;
+  }
   if (s.boost && !s.window) {
     // Température estimée en fin de boost, avec la vitesse de chauffe apprise (plafonnée par le bouton du radiateur, 7/8 ≈ 25 °C)
     const left = Math.max(0, (s.boost - Date.now()) / 60e3);
@@ -772,7 +778,7 @@ function renderPresence(full) {
     : pres.source === 'retour' && pres.returnAt
       ? `Retour de vacances prévu à ${hhmm(pres.returnAt)} : l’appart se réchauffe`
     : pres.profile === 'vacances' && pres.returnAt
-      ? `Retour prévu ${dayText(pres.returnAt)}, chauffage relancé à ${hhmm(pres.until)}`
+      ? `Retour prévu ${dayText(pres.returnAt)}, ` + (pres.until >= pres.returnAt ? 'chauffage relancé automatiquement avant' : `chauffage relancé à ${hhmm(pres.until)}`)
       : (pres.source === 'manuel' ? 'Forcé ' : 'Selon le planning ') + untilText(pres.until, pres.source);
   const names = { nathan: 'Nathan', jade: 'Jade' };
   $('#people').innerHTML = pres.autoPresence ? Object.entries(pres.people || {}).map(([id, p]) => {
