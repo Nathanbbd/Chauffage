@@ -1181,7 +1181,7 @@ function renderAlert(unreachable) {
 }
 
 /* Estimation « consigne atteinte vers… » : vitesse de chauffe apprise sur les 7 derniers jours */
-const DEFAULT_RATE = { salon: 10, chambre: 15 };   // min par °C sous 20 °C, mesurés du 3 au 6 novembre 2026
+const DEFAULT_RATE = { salon: 10, chambre: 11 };   // min par °C sous 20 °C, mesurés du 8 au 13 nov. (roulettes sur 7)
 let rates = {}, ratesAt = 0;
 const rateOf = id => rates[id] || { min: DEFAULT_RATE[id] ?? 12, n: 0 };
 /* Vitesse de chauffe apprise degré par degré. Au-dessus de 20 °C, c'est plus lent : le thermostat interne
