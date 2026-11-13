@@ -407,7 +407,11 @@ function effectivePresence(manual, people, sched, now) {
     return planAt(sched, now).profile === 'absent' ? { profile: 'maison', until: manual.returnAt + 3 * 36e5, source: 'retour' } : null;
   if (!sched.autoPresence || !people || !Object.keys(people).length) return null;
   if (!Object.values(people).some(p => isHome(p, now))) return { profile: 'absent', until: null, source: 'wifi' };
-  if (planAt(sched, now).profile === 'absent') return { profile: 'maison', until: null, source: 'wifi' };
+  if (planAt(sched, now).profile === 'absent') {
+    // Quelqu'un est là alors que le planning dit Absent : « À la maison » jusqu'au prochain créneau Nuit (ou autre)
+    const nx = slots(sched, now).find(x => x.t > now && x.p !== 'absent' && x.p !== 'maison');
+    return { profile: 'maison', until: nx ? nx.t : null, source: 'wifi' };
+  }
   return null;                                                                   // quelqu'un est là : planning normal (maison / nuit)
 }
 
