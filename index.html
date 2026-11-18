@@ -82,6 +82,14 @@ h2{font-size:1.1rem;margin:28px 0 10px;font-weight:600}
 .stat strong{display:block;white-space:nowrap;font-size:1.25rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .stat span{color:var(--muted);font-size:.8rem}
 .total{margin-top:8px;color:var(--muted);font-size:.9rem}
+.air{background:var(--surface);border-radius:14px;padding:12px 14px;margin-top:18px}
+.airTop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.airTop span{color:var(--muted);font-size:.85rem}
+.airAdv{margin:6px 0 10px;font-size:.92rem;color:var(--muted)}
+.airAdv.block{color:var(--cool);font-weight:600}
+.airAdv.unblock{color:var(--ink);font-weight:600}
+.airBtn{width:100%;border:1px solid var(--line);background:none;border-radius:10px;padding:10px;font-weight:600;font-size:.92rem;color:var(--ink)}
+.airBtn.on{background:var(--cool);border-color:var(--cool);color:#fff}
 .daynav{display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px}
 .daynav h2{margin:0;text-align:center;flex:1}
 .daynav button{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:1.4rem;line-height:1;color:var(--ink)}
@@ -221,6 +229,11 @@ body.fit .modes{margin-top:14px}
 
   <!-- INFOS -->
   <section id="tab-infos" hidden>
+    <div class="air" id="air">
+      <div class="airTop"><b>Air et VMC</b><span id="airNums"></span></div>
+      <p class="airAdv" id="airAdv"></p>
+      <button type="button" class="airBtn" id="vmcBtn"></button>
+    </div>
     <div class="daynav">
       <button type="button" id="dayPrev" aria-label="Jour précédent">‹</button>
       <h2 id="dayLabel">Aujourd’hui</h2>
@@ -487,6 +500,8 @@ const api = {
   presence:       ()            => cfg.demo ? mock.presence()              : req('/presence'),
   presenceAction: (action, until, returnAt) => cfg.demo ? mock.presenceAction(action, until, returnAt) : post('/presence', { action, until, returnAt }),
   costs:          ()            => cfg.demo ? mock.costs()                 : req('/costs'),
+  air:            ()            => cfg.demo ? mock.air()                   : req('/air'),
+  setVmc:         blocked       => cfg.demo ? mock.setVmc(blocked)         : post('/vmc', { blocked }),
   weeklyNow:      ()            => cfg.demo ? Promise.reject(new Error('indisponible en mode démo')) : post('/notify/weekly', {}),
   notifyTest:     topic         => cfg.demo ? Promise.reject(new Error('indisponible en mode démo')) : post('/notify/test', { topic }),
   setPerson:      (person, action) => cfg.demo ? mock.setPerson(person, action) : post('/presence', { person, action, force: true }),
@@ -497,6 +512,11 @@ const api = {
 /* =========================================================
    MOCK : même logique que le Worker (shared/logic.js)
    ========================================================= */
+let demoVmc = { blocked: false, since: null };
+const airDemo = () => ({ vmc: demoVmc, outdoor: { temp: 6, hum: 82 },
+  rooms: { salon: { hum: 63, avg3h: 62 }, chambre: { hum: 67, avg3h: 66 } },
+  advice: demoVmc.blocked ? { level: 'block', text: 'Garde la VMC bloquée : l’air dehors est nettement plus sec, elle est efficace.' }
+                          : { level: 'block', text: 'Humide depuis 3 h et l’air dehors est plus sec : bloquer la VMC à fond est utile.' } });
 const mock = (() => {
   const STEP = 5 * 60e3, start = Date.now(), state = {}, hist = {}, evts = [];
   let sched = structuredClone(DEFAULT_SCHEDULE), presence = null;
@@ -581,6 +601,8 @@ const mock = (() => {
       const days = (Date.now() - start) / 864e5;
       return { monthStart: start, monthEnd: end, since: start, monthToDate: days * 1.1, avgPerDay: 1.1, daysUsed: 7, projection: 1.1 * (end - start) / 864e5 };
     },
+    air: async () => airDemo(),
+    setVmc: async b => { demoVmc = { blocked: b, since: Date.now() }; return airDemo(); },
     resetHistory: async () => { ROOMS.forEach(r => { hist[r.id].length = 0; }); evts.length = 0; return { ok: true }; },
   };
 })();
@@ -920,7 +942,30 @@ $('#dayNext').onclick = () => goDay(-1);
   });
 }
 
+/* Air et VMC : humidité, conseil, et bouton pour noter que la bouche est bloquée à fond */
+let airData = null;
+async function renderAir() {
+  try { airData = await api.air(); } catch { $('#air').hidden = true; return; }
+  $('#air').hidden = false;
+  const a = airData, r = a.rooms || {}, pct = v => v == null ? '–' : `${Math.round(v)} %`;
+  $('#airNums').textContent = `Salon ${pct(r.salon?.hum)} · Chambre ${pct(r.chambre?.hum)} · Dehors ${pct(a.outdoor?.hum)}`
+    + (a.outdoor?.temp != null ? `, ${fmt(a.outdoor.temp)} °C` : '');
+  const adv = $('#airAdv');
+  adv.textContent = a.advice?.text || '';
+  adv.className = 'airAdv ' + (a.advice?.level || '');
+  const b = $('#vmcBtn');
+  b.classList.toggle('on', !!a.vmc?.blocked);
+  b.textContent = a.vmc?.blocked
+    ? `VMC bloquée à fond${a.vmc.since ? ` depuis ${dayText(a.vmc.since).replace('aujourd’hui à ', '')}` : ''} · Remettre en automatique`
+    : 'J’ai bloqué la VMC à fond';
+}
+$('#vmcBtn').onclick = async () => {
+  try { airData = await api.setVmc(!airData?.vmc?.blocked); } catch (err) { showConn(err); }
+  renderAir();
+};
+
 async function renderInfos() {
+  renderAir();
   if (!infosCache.hist || Date.now() - infosCache.at > 2 * 60e3) {
     try {
       const [hist, evts] = await Promise.all([api.history(24 * (MAX_DAYS + 1)), api.allEvents()]);
@@ -948,7 +993,8 @@ async function renderInfos() {
     return { hours, kwh: hours * kw, eur };
   };
   const c = cost(current);
-  $('#stTime').textContent = `${Math.floor(c.hours)} h ${String(Math.round(c.hours % 1 * 60)).padStart(2, '0')}`;
+  const totMin = Math.round(c.hours * 60);
+  $('#stTime').textContent = `${Math.floor(totMin / 60)} h ${String(totMin % 60).padStart(2, '0')}`;
   $('#stKwh').textContent = `${fmt(c.kwh, 1)} kWh`;
   $('#stCost').textContent = `${fmt(c.eur, 2)} €`;
   const all = ROOMS.reduce((s, r) => s + cost(r.id).eur, 0);
