@@ -102,6 +102,7 @@ h2{font-size:1.1rem;margin:28px 0 10px;font-weight:600}
 .chart svg{display:block;width:100%;height:auto}
 .legend{display:flex;gap:14px;font-size:.78rem;color:var(--muted);padding:6px 6px 0;flex-wrap:wrap;row-gap:4px}
 .legend span{white-space:nowrap}
+.legend i.hatch{background:repeating-linear-gradient(135deg,var(--muted) 0 1.5px,transparent 1.5px 4px);outline:1px solid var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 ul.log{list-style:none;margin:0;padding:0;background:var(--surface);border-radius:14px}
 ul.log li{display:grid;grid-template-columns:52px 1fr auto;gap:10px;padding:11px 14px;border-top:1px solid var(--line);font-size:.92rem}
@@ -258,7 +259,7 @@ body.fit .modes{margin-top:14px}
     <h2>Humidité</h2>
     <div class="chart">
       <svg viewBox="0 0 600 170" id="hchart" role="img" aria-label="Courbe d’humidité sur 24 heures"></svg>
-      <div class="legend"><span><i style="background:var(--cool)"></i>Humidité</span><span><i style="background:var(--cool-soft);outline:1px solid var(--line)"></i>Idéal 40–60 %</span><span><i style="background:var(--vmc-soft);outline:1px solid var(--cool)"></i>VMC bloquée</span></div>
+      <div class="legend"><span><i style="background:var(--cool)"></i>Humidité</span><span><i style="background:var(--cool-soft);outline:1px solid var(--line)"></i>Idéal 40–60 %</span><span><i style="background:var(--vmc-soft);outline:1px solid var(--cool)"></i>VMC bloquée</span><span><i class="hatch"></i>Fenêtre ouverte</span></div>
     </div>
     <h2>Déclenchements</h2>
     <ul class="log" id="log"></ul>
@@ -974,7 +975,25 @@ $('#vmcBtn').onclick = async () => {
 };
 
 /* Courbe d'humidité du jour : zone idéale 40–60 %, seuil 65 %, périodes de VMC bloquée */
-function renderHumidity(all, d0, d1, inDay) {
+/* Périodes « fenêtre ouverte » d'une pièce, d'après le journal : du signalement (manuel ou détecté)
+   jusqu'à « c'est fermé », ou jusqu'à la fin de la durée choisie */
+function windowSpans(evts, room) {
+  const list = (evts || []).filter(e => e.room === room && (e.type === 'window' || e.type === 'window_end')).sort((a, b) => a.t - b.t);
+  const spans = [];
+  for (const e of list) {
+    if (e.type !== 'window') continue;
+    const m = String(e.reason || '').match(/(\d+)\s*min/);
+    let end = e.t + (m ? +m[1] : 30) * 60e3;
+    const close = list.find(x => x.type === 'window_end' && x.t > e.t && x.t < end);
+    if (close) end = close.t;
+    const nextOpen = list.find(x => x.type === 'window' && x.t > e.t && x.t < end);  // re-signalée : on enchaîne
+    if (nextOpen) end = nextOpen.t;
+    spans.push([e.t, end]);
+  }
+  return spans;
+}
+
+function renderHumidity(all, d0, d1, inDay, wins = []) {
   const pts = all.filter(p => p.humidity != null && inDay(p));
   const W = 600, H = 170, L = 34, B = 24, T = 8;
   if (pts.length < 2) {
@@ -994,6 +1013,13 @@ function renderHumidity(all, d0, d1, inDay) {
       st = null;
     }
   });
+  svg = `<defs><pattern id="hatchWin" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">`
+    + `<line x1="0" y1="0" x2="0" y2="6" stroke="var(--muted)" stroke-width="2" opacity=".7"/></pattern></defs>` + svg;
+  for (const [a, b] of wins) {                                 // fenêtre ouverte : hachures grises
+    const s = Math.max(a, d0), e = Math.min(b, d1);
+    if (e <= s) continue;
+    svg += `<rect x="${X(s)}" y="${T}" width="${Math.max(5, X(e) - X(s))}" height="${H - T - B}" fill="url(#hatchWin)"/>`;
+  }
   for (let v = lo; v <= hi; v += 10) {
     svg += `<line x1="${L}" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1"/>`;
     svg += `<text x="${L - 6}" y="${Y(v) + 4}" font-size="11" fill="var(--muted)" text-anchor="end">${v} %</text>`;
@@ -1090,7 +1116,7 @@ async function renderInfos() {
     svg += `<polyline fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" points="${smooth.map(p => `${X(p.t)},${Y(p.temp)}`).join(' ')}"/>`;
     $('#chart').innerHTML = svg;
   }
-  renderHumidity(hist[current] || [], d0, d1, inDay);
+  renderHumidity(hist[current] || [], d0, d1, inDay, windowSpans(evts, current));
 
   const label = e => ({
     on: 'Chauffe lancée', off: 'Chauffe coupée',
