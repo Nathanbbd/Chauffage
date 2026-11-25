@@ -60,6 +60,9 @@ h1{font-size:1.5rem;font-weight:800;margin:0;letter-spacing:-.01em}
 .adjust .boost{width:auto;height:44px;padding:0 16px;border-radius:22px;border:1.5px solid var(--heat);background:none;color:var(--heat);font-size:.95rem;font-weight:600;min-width:132px}
 .adjust .boost.on{background:var(--heat);color:#fff}
 .adjust .boost:disabled{opacity:.4}
+.adjust.picking{gap:8px}
+.adjust button.bpick{width:auto;height:44px;padding:0 16px;white-space:nowrap;flex:0 0 auto;border-radius:22px;border:1.5px solid var(--heat);background:none;color:var(--heat);font-weight:600;font-size:.95rem}
+.adjust .bx{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:1.2rem}
 .winbar{display:flex;gap:6px;margin-top:12px;min-height:42px}
 .winbar button{flex:1;height:42px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--cool);font-weight:600;font-size:.92rem}
 .winbar .x{flex:0 0 42px;color:var(--muted);font-size:1.2rem}
@@ -188,7 +191,7 @@ body.fit .modes{margin-top:14px}
     </div>
     <div class="adjust">
       <button id="minus" aria-label="Baisser la consigne">−</button>
-      <button id="boost" class="boost">Boost 30 min</button>
+      <button id="boost" class="boost">Boost</button>
       <button id="plus" aria-label="Monter la consigne">+</button>
     </div>
     <p class="status" id="status"></p>
@@ -585,7 +588,7 @@ const mock = (() => {
         if (p.mode === 'auto') room.manualSp = room.manualUntil = null;
         evts.push({ t, room: id, type: 'mode', temp: room.temp, reason: p.mode });
       }
-      if (p.boost === true) { room.boostUntil = t + 30 * 60e3; evts.push({ t, room: id, type: 'boost', temp: room.temp, reason: '30 min' }); }
+      if (p.boost === true || typeof p.boost === 'number') { const mn = typeof p.boost === 'number' ? p.boost : 30; room.boostUntil = t + mn * 60e3; evts.push({ t, room: id, type: 'boost', temp: room.temp, reason: `${mn} min` }); }
       else if (p.boost === false && room.boostUntil) { room.boostUntil = null; evts.push({ t, room: id, type: 'boost_end', temp: room.temp, reason: 'manuel' }); }
       if (typeof p.window === 'number') { room.windowUntil = t + p.window * 60e3; evts.push({ t, room: id, type: 'window', temp: room.temp, reason: `manuel, ${p.window} min` }); }
       if (p.window === false && room.windowUntil > 0) {
@@ -733,7 +736,8 @@ function renderDial() {
 
   $('#minus').disabled = $('#plus').disabled = s.mode !== 'auto';
   const bb = $('#boost');
-  bb.textContent = s.boost ? 'Arrêter le boost' : 'Boost 30 min';
+  bb.textContent = s.boost ? 'Arrêter le boost' : 'Boost';
+  renderBoostPick();
   bb.classList.toggle('on', !!s.boost);
   bb.disabled = !!s.window;
   $('#dial').style.opacity = s.mode === 'auto' ? 1 : .55;
@@ -751,9 +755,30 @@ function nudge(d) {
   pendingSp = clamp((pendingSp ?? s.setpoint ?? 19) + d, SP_MIN, SP_MAX); renderDial();
   clearTimeout(spTimer); spTimer = setTimeout(() => commitSetpoint(pendingSp), 700);
 }
+/* Boost : un appui propose 10, 20 ou 30 min à la place des boutons − Boost + */
+let boostPick = false;
+function renderBoostPick() {
+  const row = $('.adjust'); if (!row) return;
+  const s = rooms[current], on = boostPick && s && !s.boost && !s.window;
+  row.classList.toggle('picking', on);
+  ['minus', 'boost', 'plus'].forEach(id => { $('#' + id).hidden = on; });
+  let pick = $('#bpick');
+  if (!pick) { pick = document.createElement('span'); pick.id = 'bpick'; pick.style.display = 'contents'; row.appendChild(pick); }
+  pick.innerHTML = on ? [10, 20, 30].map(m => `<button type="button" class="bpick" data-min="${m}">${m} min</button>`).join('')
+    + `<button type="button" class="bx" data-min="x" aria-label="Annuler">×</button>` : '';
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('#bpick button'); if (!b) return;
+  boostPick = false;
+  if (b.dataset.min !== 'x') {
+    try { rooms[current] = await api.set(current, { boost: Number(b.dataset.min) }); } catch (err) { showConn(err); }
+  }
+  renderAll();
+});
 $('#boost').onclick = async () => {
   const s = rooms[current]; if (!s) return;
-  try { rooms[current] = await api.set(current, { boost: !s.boost }); } catch (err) { showConn(err); }
+  if (!s.boost) { boostPick = true; return renderBoostPick(); }
+  try { rooms[current] = await api.set(current, { boost: false }); } catch (err) { showConn(err); }
   renderAll();
 };
 $('#minus').onclick = () => nudge(-1);
@@ -1123,7 +1148,7 @@ async function renderInfos() {
     mode: `Mode ${MODES.find(m => m.id === e.reason)?.label ?? e.reason}`,
     setpoint: 'Consigne modifiée',
     window: 'Fenêtre ouverte détectée', window_end: 'Fenêtre fermée',
-    boost: 'Boost 30 min', boost_end: 'Boost arrêté',
+    boost: `Boost ${e.reason || ''}`.trim(), boost_end: 'Boost arrêté',
   }[e.type]);
   const list = (evts || []).filter(e => e.room === current && inDay(e) && label(e));
   $('#log').innerHTML = list.length
